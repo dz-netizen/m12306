@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Query Route</title>
+</head>
+<body bgcolor="#f7f7f7" text="#111111">
+	<h2>Query Route</h2>
+	<p>
+		<a id="back_home" href="/cgi-bin/home.cgi">Back Home</a>
+	</p>
+	<form method="get" action="/cgi-bin/query_route.cgi">
+		Username: <input type="text" name="username" id="username" required><br><br>
+		From City: <input type="text" name="from_city" id="from_city" required><br><br>
+		To City: <input type="text" name="to_city" id="to_city" required><br><br>
+		Seat Type:
+		<select name="seat_type" id="seat_type">
+			<option value="二等座">二等座</option>
+			<option value="一等座">一等座</option>
+			<option value="商务座">商务座</option>
+		</select><br><br>
+		Date: <input type="date" name="date" id="date" value="2026-05-01"><br><br>
+		Time: <input type="time" name="time" id="time" value="00:00"><br><br>
+		<input type="submit" value="Search">
+	</form>
+
+	<script>
+		const q = new URLSearchParams(window.location.search);
+		const usernameInput = document.getElementById("username");
+		const backHome = document.getElementById("back_home");
+		["username", "from_city", "to_city", "seat_type", "date", "time"].forEach(k => {
+			if (q.has(k)) {
+				const el = document.getElementById(k);
+				if (el) el.value = q.get(k);
+			}
+		});
+
+		function updateBackHome() {
+			const u = usernameInput.value.trim();
+			backHome.href = u ? ("/cgi-bin/home.cgi?username=" + encodeURIComponent(u)) : "/cgi-bin/home.cgi";
+		}
+
+		usernameInput.addEventListener("input", updateBackHome);
+		updateBackHome();
+	</script>
+</body>
+</html>
