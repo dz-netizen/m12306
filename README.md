@@ -65,20 +65,29 @@ Lab2
 
 - 执行 `generate_import_files.py`
 
+`Lab2/db/data/preprocess$ python3 generate_import_files.py `
 
 --- 
-- 执行`schema.sql`和`load_data.sql`
-`$psql -d <db> -f db/build/schema.sql`
-`$psql -d <db> -f db/build/load_data.sql`
+
+- 执行`schema.sql`
+
+`Lab2$ psql -d <db> -f db/build/schema.sql`
+
+-执行`load_data.sql`
+
+`Lab2$ psql -d <db> -f db/build/load_data.sql`
 
 注意需要在对应目录下执行该命令，比如示例中为Lab2
 
 ---
 
 - cgi
-`$ sh run_cgi.sh`
+
+`setup/code$ sh run_cgi.sh`
 
 - html
-`sh run_html.sh`
+
+`setup/vm-apache/htdocs(html)$ sh run_html.sh`
+
 
 - 查看 http://localhost:8080/m12306index.html
