@@ -8,86 +8,80 @@ https://github.com/dz-netizen/m12306
 
 ## 代码概览
 
-```cpp
-Lab2
-├── db
-│   ├── build
-│   │   ├── load_data.sql   // 数据导入脚本
-│   │   └── schema.sql      
-│   │       // - 创建所有表（User / Train / Station / Orders 等）
-│   │       // - 定义主键、外键、约束
-│   │       // - 是整个系统的数据基础（核心）
-│   └── data
-│       ├── preprocess
-|       |   ├── generate_import_files.py    //数据预处理脚本
-│       │   └── output  // 数据预处理结果  
-│       └── train-2026-03    // 原始列车数据集       
-└── setup
-    ├── code
-    |   ├── m12306_common.h //头文件
-    |   ├── Makefile    //编译
-    |   ├── run_cgi.sh  //便捷执行脚本
-    │   ├── admin.cpp   // 管理员功能（需求9）
-    │   ├── book.cpp    // 订票逻辑（需求7）  
-    │   ├── home.cpp    // 登录后首页
-    │   ├── login.cpp   // 登录处理
-    │   ├── orders.cpp  // 订单管理（需求8）
-    │   ├── query_route.cpp // 两地查询（需求5/6，最复杂）
-    │   ├── query_train.cpp // 单车次查询（需求4）
-    │   └── register.cpp    // 注册处理（需求3）
-    └── vm-apache
-        └── htdocs(html)
-            ├── run_html.sh         //便捷执行脚本
-            ├── m12306index.html    // 登录页面（系统入口）
-            ├── query_route.html    // 两地查询输入页（需求5/6）
-            ├── query_train.html    // 单车次查询输入页（需求4）
-            └── register.html       // 注册输入页（需求3）
 ```
-
----
-
-## schema
+m12306
+├── Makefile              // 编译
+├── deploy_cgi.sh         // 部署 CGI 脚本
+├── deploy_html.sh        // 部署 HTML 脚本
+├── src
+│   ├── m12306_common.h   // 头文件
+│   ├── admin.cpp         // 管理员功能（需求9）
+│   ├── book.cpp          // 订票逻辑（需求7）
+│   ├── home.cpp          // 登录后首页
+│   ├── login.cpp         // 登录处理
+│   ├── orders.cpp        // 订单管理（需求8）
+│   ├── query_route.cpp   // 两地查询（需求5/6，最复杂）
+│   ├── query_train.cpp   // 单车次查询（需求4）
+│   └── register.cpp      // 注册处理（需求3）
+├── html
+│   ├── m12306index.html  // 登录页面（系统入口）
+│   ├── query_route.html  // 两地查询输入页（需求5/6）
+│   ├── query_train.html  // 单车次查询输入页（需求4）
+│   └── register.html     // 注册输入页（需求3）
+├── db
+│   ├── sql
+│   │   ├── schema.sql       // 创建所有表（User / Train / Station / Orders 等）
+│   │   │                    // 定义主键、外键、约束
+│   │   └── load_data.sql    // 数据导入脚本
+│   ├── data
+│   │   ├── raw/train-2026-03 // 原始列车数据集
+│   │   └── processed        // 预处理后的 .tbl 文件
+│   └── scripts
+│       └── generate_import_files.py    // 数据预处理脚本
+└── build                 // CGI 编译产物
+```
 
 ---
 
 ## 执行过程
 
-- 开启apache2服务
-`$sudo service apache2 start`
+### 1. 启动服务
 
-- 开启postgresql服务
-`$sudo service postgresql start`
+```bash
+sudo service apache2 start
+sudo service postgresql start
+```
 
-- 建立数据库m12306
+### 2. 建立数据库
 
+```bash
+# 创建数据库 m12306（首次运行）
+sudo -u postgres createdb m12306
+```
 
-- 将train-2026-03解压缩于`/Lab2/db/data/`
+### 3. 准备数据
 
-- 执行 `generate_import_files.py`
+将 train-2026-03 解压缩于 `db/data/raw/`，然后执行预处理脚本：
 
-`Lab2/db/data/preprocess$ python3 generate_import_files.py `
+```bash
+python3 db/scripts/generate_import_files.py
+```
 
---- 
+### 4. 初始化数据库
 
-- 执行`schema.sql`
+```bash
+psql -d m12306 -f db/sql/schema.sql    # 创建表
+psql -d m12306 -f db/sql/load_data.sql # 导入数据
+```
 
-`Lab2$ psql -d <db> -f db/build/schema.sql`
+### 5. 编译部署
 
--执行`load_data.sql`
+```bash
+make                # 编译 CGI
+sh deploy_cgi.sh    # 部署 CGI
+sh deploy_html.sh   # 部署 HTML
+```
 
-`Lab2$ psql -d <db> -f db/build/load_data.sql`
+### 6. 访问系统
 
-注意需要在对应目录下执行该命令，比如示例中为Lab2
-
----
-
-- cgi
-
-`setup/code$ sh run_cgi.sh`
-
-- html
-
-`setup/vm-apache/htdocs(html)$ sh run_html.sh`
-
-
-- 查看 http://localhost:8080/m12306index.html
+http://localhost:8080/m12306index.html
