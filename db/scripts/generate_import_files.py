@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate COPY-ready .tbl files from train-2026-03 raw text dataset.
 
-Outputs are written to: db/data/preprocess/output
+Outputs are written to: db/data/processed/
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-BASE_DIR = Path(__file__).resolve().parent
-RAW_DIR = (BASE_DIR / "../train-2026-03").resolve()
-OUT_DIR = (BASE_DIR / "output").resolve()
+BASE_DIR = Path(__file__).resolve().parent.parent  # db/
+RAW_DIR = BASE_DIR / "data" / "raw" / "train-2026-03"
+OUT_DIR = BASE_DIR / "data" / "processed"
 
 STATIONS_FILE = RAW_DIR / "stations.txt"
 TRAIN_FILE_RE = re.compile(r"^G\d+\.txt$")
