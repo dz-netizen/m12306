@@ -159,5 +159,5 @@ CREATE INDEX idx_order_item_order ON Order_Item(order_id);
 -- Data Import Next Step
 -- =========================
 -- After schema creation, run:
---   psql -d <your_db_name> -f db/build/load_data.sql
+--   psql -d <your_db_name> -f db/sql/load_data.sql
 

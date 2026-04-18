@@ -1,0 +1,5 @@
+CLAUDE.md
+.claude/
+build/
+db/data/raw/train-2026-03
+db/data/processed/
