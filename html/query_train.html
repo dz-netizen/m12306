@@ -12,27 +12,27 @@
 	<form method="get" action="/cgi-bin/query_train.cgi">
 		Username: <input type="text" name="username" id="username" required><br><br>
 		Train ID: <input type="text" name="train_id" placeholder="G1" required><br><br>
-		Seat Type:
-		<select name="seat_type" id="seat_type">
-			<option value="二等座">二等座</option>
-			<option value="一等座">一等座</option>
-			<option value="商务座">商务座</option>
-		</select><br><br>
-		Date: <input type="date" name="date" value="2026-05-01"><br><br>
+		Date: <input type="date" name="date" id="date"><br><br>
 		<input type="submit" value="Search">
 	</form>
 
 	<script>
 		const q = new URLSearchParams(window.location.search);
 		const usernameInput = document.getElementById("username");
+		const dateInput = document.getElementById("date");
 		const backHome = document.getElementById("back_home");
+
+		if (!q.has("date")) {
+			const d = new Date();
+			d.setDate(d.getDate() + 1);
+			dateInput.value = d.toISOString().slice(0, 10);
+		}
 
 		if (q.has("username")) {
 			usernameInput.value = q.get("username");
 		}
-		if (q.has("seat_type")) {
-			const seatType = document.getElementById("seat_type");
-			seatType.value = q.get("seat_type");
+		if (q.has("date")) {
+			dateInput.value = q.get("date");
 		}
 
 		function updateBackHome() {

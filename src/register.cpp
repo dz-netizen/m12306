@@ -1,4 +1,5 @@
 #include <string>
+#include <cctype>
 
 #include "m12306_common.h"
 
@@ -12,6 +13,14 @@ static bool exists_value(PGconn *conn, const char *sql, const std::string &value
 	bool exists = (std::atoi(PQgetvalue(res, 0, 0)) > 0);
 	PQclear(res);
 	return exists;
+}
+
+static bool is_valid_phone(const std::string &phone) {
+	if (phone.size() != 11) return false;
+	for (size_t i = 0; i < phone.size(); ++i) {
+		if (!std::isdigit(static_cast<unsigned char>(phone[i]))) return false;
+	}
+	return true;
 }
 
 int main() {
@@ -34,6 +43,12 @@ int main() {
 
 	if (username.empty() || phone.empty() || name.empty()) {
 		std::cout << "<p class=\"err\">username/phone/name are required.</p>";
+		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+		m12306::print_page_end();
+		return 0;
+	}
+	if (!is_valid_phone(phone)) {
+		std::cout << "<p class=\"err\">Invalid phone format: phone must be 11 digits.</p>";
 		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
 		m12306::print_page_end();
 		return 0;

@@ -8,7 +8,7 @@
 	<h2>M12306 Register</h2>
 	<form method="get" action="/cgi-bin/register.cgi">
 		Username: <input type="text" name="username" maxlength="20" required><br><br>
-		Phone: <input type="text" name="phone" maxlength="11" required><br><br>
+		Phone: <input type="text" name="phone" required pattern="[0-9]{11}" maxlength="11" inputmode="numeric" title="Phone must be 11 digits"><br><br>
 		Name: <input type="text" name="name" maxlength="20" required><br><br>
 		Password: <input type="password" name="password" maxlength="100"><br><br>
 		<input type="submit" value="Register">

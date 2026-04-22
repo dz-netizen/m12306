@@ -2,6 +2,7 @@
 #define M12306_COMMON_H
 
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -102,6 +103,61 @@ inline bool ensure_inventory(PGconn *conn, const std::string &train_id, const st
     bool ok = (PQresultStatus(res) == PGRES_COMMAND_OK);
     PQclear(res);
     return ok;
+}
+
+inline std::string tomorrow_date() {
+    std::time_t now = std::time(NULL);
+    std::tm tmv = *std::localtime(&now);
+    tmv.tm_mday += 1;
+    std::mktime(&tmv);
+
+    char buf[11];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tmv);
+    return std::string(buf);
+}
+
+inline bool parse_ymd(const std::string &s, int &y, int &m, int &d) {
+    if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+    for (int i = 0; i < 10; ++i) {
+        if (i == 4 || i == 7) continue;
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+
+    y = std::atoi(s.substr(0, 4).c_str());
+    m = std::atoi(s.substr(5, 2).c_str());
+    d = std::atoi(s.substr(8, 2).c_str());
+
+    std::tm tmv = {};
+    tmv.tm_year = y - 1900;
+    tmv.tm_mon = m - 1;
+    tmv.tm_mday = d;
+    tmv.tm_hour = 12;
+    if (std::mktime(&tmv) == -1) return false;
+    return (tmv.tm_year == y - 1900 && tmv.tm_mon == m - 1 && tmv.tm_mday == d);
+}
+
+inline bool is_after_today(const std::string &date) {
+    int y = 0, m = 0, d = 0;
+    if (!parse_ymd(date, y, m, d)) return false;
+
+    std::time_t now = std::time(NULL);
+    std::tm today = *std::localtime(&now);
+    today.tm_hour = 0;
+    today.tm_min = 0;
+    today.tm_sec = 0;
+
+    std::tm target = {};
+    target.tm_year = y - 1900;
+    target.tm_mon = m - 1;
+    target.tm_mday = d;
+    target.tm_hour = 0;
+    target.tm_min = 0;
+    target.tm_sec = 0;
+
+    std::time_t t_today = std::mktime(&today);
+    std::time_t t_target = std::mktime(&target);
+    if (t_today == -1 || t_target == -1) return false;
+    return t_target > t_today;
 }
 
 inline std::string qs(const std::string &username) {
