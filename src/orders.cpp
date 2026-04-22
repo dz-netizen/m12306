@@ -87,18 +87,40 @@ int main() {
 
 	const char *list_sql =
 		"SELECT o.order_id::text, o.create_time::date::text, "
+		"       COALESCE(train_info.train_ids,'-') AS train_ids, "
+		"       COALESCE(seat_info.seat_types,'-') AS seat_types, "
 		"       COALESCE(sf.station_name,'-') AS from_station, "
 		"       COALESCE(st.station_name,'-') AS to_station, "
+		"       COALESCE(tsf.departure_time::text,'-') AS depart_time, "
+		"       COALESCE(tst.arrival_time::text,'-') AS arrive_time, "
 		"       o.total_price::text, o.status "
 		"FROM orders o "
+		"LEFT JOIN LATERAL ("
+		"  SELECT string_agg(oi.train_id, '->' ORDER BY oi.id) AS train_ids "
+		"  FROM order_item oi WHERE oi.order_id=o.order_id"
+		") train_info ON TRUE "
+		"LEFT JOIN LATERAL ("
+		"  SELECT string_agg(oi.seat_type, '->' ORDER BY oi.id) AS seat_types "
+		"  FROM order_item oi WHERE oi.order_id=o.order_id"
+		") seat_info ON TRUE "
 		"LEFT JOIN LATERAL ("
 		"  SELECT oi.from_station FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id ASC LIMIT 1"
 		") first_leg ON TRUE "
 		"LEFT JOIN LATERAL ("
 		"  SELECT oi.to_station FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id DESC LIMIT 1"
 		") last_leg ON TRUE "
+		"LEFT JOIN LATERAL ("
+		"  SELECT oi.train_id, oi.from_station "
+		"  FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id ASC LIMIT 1"
+		") first_seg ON TRUE "
+		"LEFT JOIN LATERAL ("
+		"  SELECT oi.train_id, oi.to_station "
+		"  FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id DESC LIMIT 1"
+		") last_seg ON TRUE "
 		"LEFT JOIN station sf ON sf.station_id=first_leg.from_station "
 		"LEFT JOIN station st ON st.station_id=last_leg.to_station "
+		"LEFT JOIN train_station tsf ON tsf.train_id=first_seg.train_id AND tsf.station_id=first_seg.from_station "
+		"LEFT JOIN train_station tst ON tst.train_id=last_seg.train_id AND tst.station_id=last_seg.to_station "
 		"WHERE o.user_id=$1::int AND o.create_time::date BETWEEN $2::date AND $3::date "
 		"ORDER BY o.order_id DESC";
 	const char *lp2[3] = {uid_s.c_str(), date_from.c_str(), date_to.c_str()};
@@ -111,15 +133,19 @@ int main() {
 		return 1;
 	}
 
-	std::cout << "<table><tr><th>Order ID</th><th>Date</th><th>From</th><th>To</th><th>Total</th><th>Status</th><th>Action</th></tr>";
+	std::cout << "<table><tr><th>Order ID</th><th>Date</th><th>Train ID</th><th>Seat Type</th><th>From</th><th>To</th><th>Depart</th><th>Arrive</th><th>Total</th><th>Status</th><th>Action</th></tr>";
 	for (int i = 0; i < PQntuples(ls); ++i) {
 		std::string oid = PQgetvalue(ls, i, 0);
-		std::string st = PQgetvalue(ls, i, 5);
+		std::string st = PQgetvalue(ls, i, 9);
 		std::cout << "<tr><td>" << m12306::html_escape(oid) << "</td>"
 				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 1)) << "</td>"
 				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 2)) << "</td>"
 				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 3)) << "</td>"
 				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 4)) << "</td>"
+				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 5)) << "</td>"
+				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 6)) << "</td>"
+				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 7)) << "</td>"
+				  << "<td>" << m12306::html_escape(PQgetvalue(ls, i, 8)) << "</td>"
 				  << "<td>" << m12306::html_escape(st) << "</td><td>";
 		std::cout << "<a href=\"/cgi-bin/orders.cgi?username=" << m12306::html_escape(username)
 				  << "&action=detail&order_id=" << m12306::html_escape(oid)
@@ -135,7 +161,7 @@ int main() {
 		}
 		std::cout << "</td></tr>";
 	}
-	if (PQntuples(ls) == 0) std::cout << "<tr><td colspan=\"7\">No orders.</td></tr>";
+	if (PQntuples(ls) == 0) std::cout << "<tr><td colspan=\"11\">No orders.</td></tr>";
 	std::cout << "</table>";
 
 	if (action == "detail" && !order_id.empty()) {

@@ -37,11 +37,32 @@ static bool lock_and_check_inventory(PGconn *conn,
 	const std::string &from_sid,
 	const std::string &to_sid) {
 	const char *sql =
-		"SELECT remaining FROM seat_inventory "
-		"WHERE train_id=$1 AND travel_date=$2::date AND seat_type=$3 AND from_station=$4::int AND to_station=$5::int FOR UPDATE";
+		"WITH req AS ("
+		"  SELECT rf.station_order AS req_from_order, rt.station_order AS req_to_order "
+		"  FROM train_station rf "
+		"  JOIN train_station rt ON rt.train_id=rf.train_id "
+		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int"
+		"), targets AS ("
+		"  SELECT si.remaining "
+		"  FROM seat_inventory si "
+		"  JOIN train_station a ON a.train_id=si.train_id AND a.station_id=si.from_station "
+		"  JOIN train_station b ON b.train_id=si.train_id AND b.station_id=si.to_station "
+		"  JOIN req r ON TRUE "
+		"  WHERE si.train_id=$1 AND si.travel_date=$2::date AND si.seat_type=$3 "
+		"    AND r.req_from_order < r.req_to_order "
+		"    AND a.station_order < r.req_to_order "
+		"    AND r.req_from_order < b.station_order "
+		"  FOR UPDATE"
+		") "
+		"SELECT COALESCE(MIN(remaining),0)::text, COUNT(*)::text FROM targets";
 	const char *params[5] = {train_id.c_str(), date.c_str(), seat_type.c_str(), from_sid.c_str(), to_sid.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
-	bool ok = (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0 && std::atoi(PQgetvalue(res, 0, 0)) > 0);
+	bool ok = false;
+	if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1) {
+		int min_remaining = std::atoi(PQgetvalue(res, 0, 0));
+		int overlap_rows = std::atoi(PQgetvalue(res, 0, 1));
+		ok = (overlap_rows > 0 && min_remaining > 0);
+	}
 	PQclear(res);
 	return ok;
 }
@@ -53,13 +74,77 @@ static bool dec_inventory(PGconn *conn,
 	const std::string &from_sid,
 	const std::string &to_sid) {
 	const char *sql =
-		"UPDATE seat_inventory SET remaining=remaining-1 "
-		"WHERE train_id=$1 AND travel_date=$2::date AND seat_type=$3 AND from_station=$4::int AND to_station=$5::int";
+		"WITH req AS ("
+		"  SELECT rf.station_order AS req_from_order, rt.station_order AS req_to_order "
+		"  FROM train_station rf "
+		"  JOIN train_station rt ON rt.train_id=rf.train_id "
+		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int"
+		") "
+		"UPDATE seat_inventory si "
+		"SET remaining=remaining-1 "
+		"FROM train_station a, train_station b, req r "
+		"WHERE si.train_id=$1 AND si.travel_date=$2::date AND si.seat_type=$3 "
+		"  AND a.train_id=si.train_id AND a.station_id=si.from_station "
+		"  AND b.train_id=si.train_id AND b.station_id=si.to_station "
+		"  AND r.req_from_order < r.req_to_order "
+		"  AND a.station_order < r.req_to_order "
+		"  AND r.req_from_order < b.station_order";
 	const char *params[5] = {train_id.c_str(), date.c_str(), seat_type.c_str(), from_sid.c_str(), to_sid.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
-	bool ok = (PQresultStatus(res) == PGRES_COMMAND_OK);
+	bool ok = false;
+	if (PQresultStatus(res) == PGRES_COMMAND_OK) {
+		int affected = std::atoi(PQcmdTuples(res));
+		ok = (affected > 0);
+	}
 	PQclear(res);
 	return ok;
+}
+
+static bool lock_user_booking_scope(PGconn *conn, int user_id) {
+	std::string uid_s = std::to_string(user_id);
+	const char *sql = "SELECT user_id FROM user_info WHERE user_id=$1::int FOR UPDATE";
+	const char *params[1] = {uid_s.c_str()};
+	PGresult *res = PQexecParams(conn, sql, 1, NULL, params, NULL, NULL, 0);
+	bool ok = (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1);
+	PQclear(res);
+	return ok;
+}
+
+static bool has_time_conflict_with_existing(PGconn *conn,
+	int user_id,
+	const std::string &train_id,
+	const std::string &from_sid,
+	const std::string &to_sid,
+	const std::string &date) {
+	std::string uid_s = std::to_string(user_id);
+	const char *sql =
+		"WITH new_leg AS ("
+		"  SELECT ($5::date + tsf.departure_time) AS dep_ts, "
+		"         ($5::date + tst.arrival_time "
+		"          + CASE WHEN tst.arrival_time <= tsf.departure_time THEN interval '1 day' ELSE interval '0 day' END) AS arr_ts "
+		"  FROM train_station tsf "
+		"  JOIN train_station tst ON tst.train_id=tsf.train_id "
+		"  WHERE tsf.train_id=$2 AND tsf.station_id=$3::int AND tst.station_id=$4::int"
+		") "
+		"SELECT EXISTS("
+		"  SELECT 1 "
+		"  FROM new_leg nl "
+		"  JOIN orders o ON o.user_id=$1::int AND o.status='正常' "
+		"  JOIN order_item oi ON oi.order_id=o.order_id "
+		"  JOIN train_station esf ON esf.train_id=oi.train_id AND esf.station_id=oi.from_station "
+		"  JOIN train_station est ON est.train_id=oi.train_id AND est.station_id=oi.to_station "
+		"  WHERE (oi.travel_date + esf.departure_time) < nl.arr_ts "
+		"    AND nl.dep_ts < (oi.travel_date + est.arrival_time "
+		"      + CASE WHEN est.arrival_time <= esf.departure_time THEN interval '1 day' ELSE interval '0 day' END)"
+		")";
+	const char *params[5] = {uid_s.c_str(), train_id.c_str(), from_sid.c_str(), to_sid.c_str(), date.c_str()};
+	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
+	bool conflict = false;
+	if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1) {
+		conflict = (std::string(PQgetvalue(res, 0, 0)) == "t");
+	}
+	PQclear(res);
+	return conflict;
 }
 
 int main() {
@@ -93,6 +178,11 @@ int main() {
 		(!is_transfer && (train_id.empty() || from_sid.empty() || to_sid.empty())) ||
 		(is_transfer && (train1.empty() || from1.empty() || to1.empty() || train2.empty() || from2.empty() || to2.empty()))) {
 		std::cout << "<p class=\"err\">Missing booking parameters.</p>";
+		m12306::print_page_end();
+		return 0;
+	}
+	if (!m12306::is_after_today(date)) {
+		std::cout << "<p class=\"err\">Invalid travel date: booking is only allowed for dates after today.</p>";
 		m12306::print_page_end();
 		return 0;
 	}
@@ -149,7 +239,22 @@ int main() {
 		}
 
 		m12306::exec_ok(conn, "BEGIN");
-		if (!lock_and_check_inventory(conn, train_id, date, seat_type, from_sid, to_sid)) {
+		if (!lock_user_booking_scope(conn, user_id)) {
+			m12306::exec_ok(conn, "ROLLBACK");
+			std::cout << "<p class=\"err\">User lock failed.</p>";
+			PQfinish(conn);
+			m12306::print_page_end();
+			return 1;
+		}
+		if (has_time_conflict_with_existing(conn, user_id, train_id, from_sid, to_sid, date)) {
+			m12306::exec_ok(conn, "ROLLBACK");
+			std::cout << "<p class=\"err\">Booking time conflicts with your existing valid order.</p>";
+			PQfinish(conn);
+			m12306::print_page_end();
+			return 0;
+		}
+		if (!lock_and_check_inventory(conn, train_id, date, seat_type, from_sid, to_sid) ||
+			!dec_inventory(conn, train_id, date, seat_type, from_sid, to_sid)) {
 			m12306::exec_ok(conn, "ROLLBACK");
 			std::cout << "<p class=\"err\">No inventory left.</p>";
 			PQfinish(conn);
@@ -180,7 +285,7 @@ int main() {
 			"VALUES($1::int,$2,$3::int,$4::int,$5,$6::numeric,$7::date)";
 		const char *itp[7] = {order_id.c_str(), train_id.c_str(), from_sid.c_str(), to_sid.c_str(), seat_type.c_str(), fare_s.c_str(), date.c_str()};
 		PGresult *it = PQexecParams(conn, item_sql, 7, NULL, itp, NULL, NULL, 0);
-		if (PQresultStatus(it) != PGRES_COMMAND_OK || !dec_inventory(conn, train_id, date, seat_type, from_sid, to_sid)) {
+		if (PQresultStatus(it) != PGRES_COMMAND_OK) {
 			PQclear(it);
 			m12306::exec_ok(conn, "ROLLBACK");
 			std::cout << "<p class=\"err\">Booking failed in transaction.</p>";
@@ -245,8 +350,25 @@ int main() {
 	}
 
 	m12306::exec_ok(conn, "BEGIN");
+	if (!lock_user_booking_scope(conn, user_id)) {
+		m12306::exec_ok(conn, "ROLLBACK");
+		std::cout << "<p class=\"err\">User lock failed.</p>";
+		PQfinish(conn);
+		m12306::print_page_end();
+		return 1;
+	}
+	if (has_time_conflict_with_existing(conn, user_id, train1, from1, to1, date) ||
+		has_time_conflict_with_existing(conn, user_id, train2, from2, to2, date)) {
+		m12306::exec_ok(conn, "ROLLBACK");
+		std::cout << "<p class=\"err\">Booking time conflicts with your existing valid order.</p>";
+		PQfinish(conn);
+		m12306::print_page_end();
+		return 0;
+	}
 	if (!lock_and_check_inventory(conn, train1, date, seat_type, from1, to1) ||
-		!lock_and_check_inventory(conn, train2, date, seat_type, from2, to2)) {
+		!lock_and_check_inventory(conn, train2, date, seat_type, from2, to2) ||
+		!dec_inventory(conn, train1, date, seat_type, from1, to1) ||
+		!dec_inventory(conn, train2, date, seat_type, from2, to2)) {
 		m12306::exec_ok(conn, "ROLLBACK");
 		std::cout << "<p class=\"err\">No inventory left for one transfer leg.</p>";
 		PQfinish(conn);
@@ -284,9 +406,7 @@ int main() {
 	PQclear(r_it1);
 	PQclear(r_it2);
 
-	if (!ok_items ||
-		!dec_inventory(conn, train1, date, seat_type, from1, to1) ||
-		!dec_inventory(conn, train2, date, seat_type, from2, to2)) {
+	if (!ok_items) {
 		m12306::exec_ok(conn, "ROLLBACK");
 		std::cout << "<p class=\"err\">Transfer booking failed in transaction.</p>";
 		PQfinish(conn);
