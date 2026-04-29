@@ -25,14 +25,16 @@ int main() {
 	}
 
 	PGresult *r1 = PQexec(conn, "SELECT COUNT(*)::text FROM orders WHERE status='正常'");
-	PGresult *r2 = PQexec(conn, "SELECT COALESCE(SUM(total_price),0)::text FROM orders WHERE status='正常'");
+	PGresult *r2 = PQexec(conn, "SELECT COALESCE(SUM(total_price),0)::numeric::text FROM orders WHERE status='正常'");
 	std::string total_orders = (PQresultStatus(r1) == PGRES_TUPLES_OK) ? PQgetvalue(r1, 0, 0) : "0";
-	std::string total_price = (PQresultStatus(r2) == PGRES_TUPLES_OK) ? PQgetvalue(r2, 0, 0) : "0";
+	std::string total_price = (PQresultStatus(r2) == PGRES_TUPLES_OK) ? PQgetvalue(r2, 0, 0) : "0.00";
 	PQclear(r1);
 	PQclear(r2);
 
-	std::cout << "<p><b>\u6709\u6548\u8ba2\u5355\u603b\u6570:</b> " << m12306::html_escape(total_orders)
-			  << " , <b>\u6709\u6548\u6536\u5165\u603b\u8ba1:</b> " << m12306::html_escape(total_price) << "</p>";
+	std::cout << "<div class=\"admin-stats\">"
+			  << "<div class=\"stat\"><div class=\"stat-label\">有效订单总数</div><div class=\"stat-value\">" << m12306::html_escape(total_orders) << "</div></div>"
+			  << "<div class=\"stat\"><div class=\"stat-label\">有效收入总计</div><div class=\"stat-value\">¥" << m12306::html_escape(total_price) << "</div></div>"
+			  << "</div>";
 
 	PGresult *top = PQexec(conn,
 		"SELECT t.train_id, COALESCE(h.cnt, 0)::text AS cnt "
@@ -45,7 +47,7 @@ int main() {
 		") h ON h.train_id=t.train_id "
 		"ORDER BY COALESCE(h.cnt, 0) DESC, t.train_id ASC "
 		"LIMIT 10");
-	std::cout << "<h3>\u7ebf\u4e0a\u70ed\u9896\u5217\u8f66 TOP 10</h3><table><tr><th>\u5217\u8f66\u53f7</th><th>\u8ba2\u7968\u6570</th></tr>";
+	std::cout << "<h3>线上热门列车 TOP 10</h3><table><tr><th>列车号</th><th>订票数</th></tr>";
 	if (PQresultStatus(top) == PGRES_TUPLES_OK) {
 		for (int i = 0; i < PQntuples(top); ++i) {
 			std::cout << "<tr><td>" << m12306::html_escape(PQgetvalue(top, i, 0))

@@ -614,6 +614,25 @@ h3 {
   border-bottom: 2px solid #f0f2f8;
 }
 
+/* ---- 管理页面统计样式 ---- */
+.admin-stats {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  margin: 12px 0 20px;
+}
+.admin-stats .stat {
+  background: #fff;
+  border: 1px solid #ece7fb;
+  padding: 12px 16px;
+  border-radius: 10px;
+  min-width: 160px;
+  box-shadow: 0 6px 18px rgba(102,126,234,0.04);
+}
+.admin-stats .stat-label { color:#6b5fa8; font-weight:700; font-size:13px; margin-bottom:6px }
+.admin-stats .stat-value { color:#2d2d3a; font-weight:800; font-size:16px }
+
+
 /* ---- 响应式 ---- */
 @media (max-width: 640px) {
   body { padding: 12px 8px; }
