@@ -78,11 +78,11 @@ int main() {
 	}
 
 
-	std::cout << "<form method=\"get\" action=\"/cgi-bin/orders.cgi\">"
+	std::cout << "<form method=\"get\" action=\"/cgi-bin/orders.cgi\" class=\"filter-form\">"
 			  << "<input type=\"hidden\" name=\"username\" value=\"" << m12306::html_escape(username) << "\">"
-			  << "From: <input type=\"date\" name=\"date_from\" value=\"" << m12306::html_escape(date_from) << "\">"
-			  << "To: <input type=\"date\" name=\"date_to\" value=\"" << m12306::html_escape(date_to) << "\">"
-			  << "<button type=\"submit\">Filter</button></form>";
+			  << "<label>起始日期 <input type=\"date\" name=\"date_from\" value=\"" << m12306::html_escape(date_from) << "\"></label>"
+			  << "<label>结束日期 <input type=\"date\" name=\"date_to\" value=\"" << m12306::html_escape(date_to) << "\"></label>"
+			  << "<button type=\"submit\">筛选</button></form>";
 
 	const char *list_sql =
 		"SELECT o.order_id::text, o.create_time::date::text, "
@@ -150,7 +150,7 @@ int main() {
 				  << "&action=detail&order_id=" << m12306::html_escape(oid)
 				  << "&date_from=" << m12306::html_escape(date_from)
 				  << "&date_to=" << m12306::html_escape(date_to)
-				  << "\">\u4e0a\u4f13</a>";
+				  << "\">\u8be6\u60c5</a>";
 		if (st == "\u6b63\u5e38") {
 			std::cout << " | <a href=\"/cgi-bin/orders.cgi?username=" << m12306::html_escape(username)
 					  << "&action=cancel&order_id=" << m12306::html_escape(oid)
@@ -180,8 +180,8 @@ int main() {
 		const char *dp[2] = {order_id.c_str(), uid_s.c_str()};
 		PGresult *dr = PQexecParams(conn, detail_sql, 2, NULL, dp, NULL, NULL, 0);
 		if (PQresultStatus(dr) == PGRES_TUPLES_OK && PQntuples(dr) > 0) {
-			std::cout << "<h3>Order Detail: " << m12306::html_escape(order_id) << "</h3>";
-			std::cout << "<table><tr><th>Leg</th><th>Train</th><th>From</th><th>To</th><th>Date</th><th>Depart</th><th>Arrive</th><th>Seat</th><th>Price</th></tr>";
+			std::cout << "<h3>订单详情：" << m12306::html_escape(order_id) << "</h3>";
+			std::cout << "<table><tr><th>程段</th><th>列车号</th><th>出发站</th><th>到达站</th><th>乘车日期</th><th>出发时间</th><th>到达时间</th><th>座位类型</th><th>价格</th></tr>";
 			for (int i = 0; i < PQntuples(dr); ++i) {
 				std::cout << "<tr><td>" << m12306::html_escape(PQgetvalue(dr, i, 0))
 						  << "</td><td>" << m12306::html_escape(PQgetvalue(dr, i, 1))

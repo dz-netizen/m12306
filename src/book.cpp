@@ -147,6 +147,7 @@ static bool has_time_conflict_with_existing(PGconn *conn,
 	return conflict;
 }
 
+
 int main() {
 	cgicc::Cgicc form;
 	std::string username = m12306::get_form_value(form, "username");
@@ -220,19 +221,26 @@ int main() {
 		double total = fare + service_fee;
 
 		if (confirm != "1") {
-			std::cout << "<p>Train: <b>" << m12306::html_escape(train_id) << "</b></p>";
-			std::cout << "<p>Route: " << m12306::html_escape(from_name) << " -> " << m12306::html_escape(to_name)
-					  << " , Date: " << m12306::html_escape(date) << "</p>";
-			std::cout << "<p>Seat: " << m12306::html_escape(seat_type)
-					  << " , Fare: " << fare << " , Fee: " << service_fee
-					  << " , Total: <b>" << total << "</b></p>";
-			std::cout << "<p><a href=\"/cgi-bin/book.cgi?username=" << m12306::html_escape(username)
+			std::cout << "<div class=\"book-card\"><div class=\"book-summary\">";
+			std::cout << "<div class=\"book-row\">"
+					  << "<div class=\"book-pair\"><span class=\"label\">Train</span><b>" << m12306::html_escape(train_id) << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Date</span><b>" << m12306::html_escape(date) << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Seat</span><b>" << m12306::html_escape(seat_type) << "</b></div>"
+					  << "</div>";
+			std::cout << "<div class=\"book-route\"><b>Route:</b> " << m12306::html_escape(from_name)
+					  << " &rarr; " << m12306::html_escape(to_name) << "</div>";
+			std::cout << "<div class=\"book-row\">"
+					  << "<div class=\"book-pair\"><span class=\"label\">Fare</span><b>" << fare << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Fee</span><b>" << service_fee << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Total</span><b>" << total << "</b></div>"
+					  << "</div>";
+			std::cout << "</div><p><a class=\"action-link\" href=\"/cgi-bin/book.cgi?username=" << m12306::html_escape(username)
 					  << "&train_id=" << m12306::html_escape(train_id)
 					  << "&from_sid=" << m12306::html_escape(from_sid)
 					  << "&to_sid=" << m12306::html_escape(to_sid)
 					  << "&date=" << m12306::html_escape(date)
 					  << "&seat_type=" << m12306::html_escape(seat_type)
-					  << "&confirm=1\">Confirm Booking</a></p>";
+					  << "&confirm=1\">Confirm Booking</a></p></div>";
 			m12306::print_page_end();
 			PQfinish(conn);
 			return 0;
@@ -322,18 +330,21 @@ int main() {
 	double total = fare1 + fare2 + service_fee;
 
 	if (confirm != "1") {
-		std::cout << "<p>Transfer Booking (2 legs):</p>";
-		std::cout << "<p>Leg1: <b>" << m12306::html_escape(train1) << "</b> "
-				  << m12306::html_escape(from_name1) << " -> " << m12306::html_escape(to_name1)
-				  << " , Fare: " << fare1 << "</p>";
-		std::cout << "<p>Leg2: <b>" << m12306::html_escape(train2) << "</b> "
-				  << m12306::html_escape(from_name2) << " -> " << m12306::html_escape(to_name2)
-				  << " , Fare: " << fare2 << "</p>";
-		std::cout << "<p>Date: " << m12306::html_escape(date)
-				  << " , Seat: " << m12306::html_escape(seat_type)
-				  << " , Fee: " << service_fee
-				  << " , Total: <b>" << total << "</b></p>";
-		std::cout << "<p><a href=\"/cgi-bin/book.cgi?username=" << m12306::html_escape(username)
+		std::cout << "<div class=\"book-card\"><div class=\"book-summary\">";
+			std::cout << "<div class=\"book-row\">"
+					  << "<div class=\"book-pair\"><span class=\"label\">Transfer Booking</span><b>2 legs</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Leg 1</span><b>" << m12306::html_escape(train1) << "</b><span class=\"muted\">"
+					  << m12306::html_escape(from_name1) << " -> " << m12306::html_escape(to_name1)
+					  << "</span><span class=\"label\">Fare</span><b>" << fare1 << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Leg 2</span><b>" << m12306::html_escape(train2) << "</b><span class=\"muted\">"
+					  << m12306::html_escape(from_name2) << " -> " << m12306::html_escape(to_name2)
+					  << "</span><span class=\"label\">Fare</span><b>" << fare2 << "</b></div>"
+					  << "<div class=\"book-pair\"><span class=\"label\">Date</span><b>" << m12306::html_escape(date)
+					  << "</b><span class=\"label\">Seat</span><b>" << m12306::html_escape(seat_type)
+					  << "</b><span class=\"label\">Fee</span><b>" << service_fee
+					  << "</b><span class=\"label\">Total</span><b>" << total << "</b></div>"
+					  << "</div>";
+		std::cout << "</div><p><a class=\"action-link\" href=\"/cgi-bin/book.cgi?username=" << m12306::html_escape(username)
 				  << "&transfer=1"
 				  << "&train1=" << m12306::html_escape(train1)
 				  << "&from1=" << m12306::html_escape(from1)
@@ -342,8 +353,8 @@ int main() {
 				  << "&from2=" << m12306::html_escape(from2)
 				  << "&to2=" << m12306::html_escape(to2)
 				  << "&date=" << m12306::html_escape(date)
-				  << "&seat_type=" << m12306::html_escape(seat_type)
-				  << "&confirm=1\">Confirm Transfer Booking</a></p>";
+					  << "&seat_type=" << m12306::html_escape(seat_type)
+					  << "&confirm=1\">Confirm Transfer Booking</a></p></div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 0;
