@@ -1,20 +1,36 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
 	<meta charset="utf-8">
-	<title>Query Train</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>M12306 - 查询列车</title>
+	<link rel="stylesheet" href="/style.css">
 </head>
-<body bgcolor="#f7f7f7" text="#111111">
-	<h2>Query Train</h2>
-	<p>
-		<a id="back_home" href="/cgi-bin/home.cgi">Back Home</a>
-	</p>
-	<form method="get" action="/cgi-bin/query_train.cgi">
-		Username: <input type="text" name="username" id="username" required><br><br>
-		Train ID: <input type="text" name="train_id" placeholder="G1" required><br><br>
-		Date: <input type="date" name="date" id="date"><br><br>
-		<input type="submit" value="Search">
-	</form>
+<body>
+	<div class="container">
+		<div class="header">
+			<h1>M12306</h1>
+			<p>查询列车信息</p>
+		</div>
+		<div class="content">
+			<a id="back_home" href="/cgi-bin/home.cgi" class="back-link">← 返回首页</a>
+			<form method="get" action="/cgi-bin/query_train.cgi" class="query-form">
+				<div class="form-group">
+					<label for="username">用户名</label>
+					<input type="text" id="username" name="username" required>
+				</div>
+				<div class="form-group">
+					<label for="train_id">列车号</label>
+					<input type="text" id="train_id" name="train_id" placeholder="例如: G1" required>
+				</div>
+				<div class="form-group">
+					<label for="date">出发日期</label>
+					<input type="date" id="date" name="date" required>
+				</div>
+				<input type="submit" value="查 询">
+			</form>
+		</div>
+	</div>
 
 	<script>
 		const q = new URLSearchParams(window.location.search);

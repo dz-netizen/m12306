@@ -8,20 +8,18 @@ int main() {
 	std::string password = m12306::get_form_value(form, "password");
 
 	if (username.empty() || password.empty()) {
-		m12306::print_page_begin("M12306 Login");
-		std::cout << "<h2>M12306 Login</h2>";
-		std::cout << "<p class=\"err\">Username and password cannot be empty.</p>";
-		std::cout << "<p><a href=\"/m12306index.html\">Back</a></p>";
+		m12306::print_page_begin("登录");
+		std::cout << "<div class=\"message err\">用户名和密码不能为空</div>";
+		std::cout << "<p><a href=\"/m12306index.html\">返回</a></p>";
 		m12306::print_page_end();
 		return 0;
 	}
 
 	PGconn *conn = m12306::connect_db();
 	if (PQstatus(conn) != CONNECTION_OK) {
-		m12306::print_page_begin("M12306 Login");
-		std::cout << "<h2>M12306 Login</h2>";
-		std::cout << "<p class=\"err\">Database connection failed: "
-				  << m12306::html_escape(PQerrorMessage(conn)) << "</p>";
+		m12306::print_page_begin("登录");
+		std::cout << "<div class=\"message err\">数据库连接失败: "
+				  << m12306::html_escape(PQerrorMessage(conn)) << "</div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 1;
@@ -37,10 +35,9 @@ int main() {
 	const char *params[1] = {username.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 1, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-		m12306::print_page_begin("M12306 Login");
-		std::cout << "<h2>M12306 Login</h2>";
-		std::cout << "<p class=\"err\">Query failed: "
-				  << m12306::html_escape(PQresultErrorMessage(res)) << "</p>";
+		m12306::print_page_begin("登录");
+		std::cout << "<div class=\"message err\">查询失败: "
+				  << m12306::html_escape(PQresultErrorMessage(res)) << "</div>";
 		PQclear(res);
 		PQfinish(conn);
 		m12306::print_page_end();
@@ -48,18 +45,15 @@ int main() {
 	}
 
 	if (PQntuples(res) == 0) {
-		m12306::print_page_begin("M12306 Login");
-		std::cout << "<h2>M12306 Login</h2>";
-		std::cout << "<p class=\"err\">User not found. Please register first.</p>";
-		std::cout << "<p><a href=\"/register.html\">Go Register</a></p>";
+		m12306::print_page_begin("登录");
+		std::cout << "<div class=\"message err\">用户不存在，请先注册</div>";
+		std::cout << "<p><a href=\"/register.html\">前往注册</a></p>";
 	} else {
 		std::string db_password = PQgetvalue(res, 0, 2);
 		if (db_password != password) {
-			m12306::print_page_begin("M12306 Login");
-			std::cout << "<h2>M12306 Login</h2>";
-			std::cout << "<p class=\"err\">Password incorrect.</p>";
-			std::cout << "<p>Please go to register page and re-register to change password.</p>";
-			std::cout << "<p><a href=\"/register.html\">Go Register</a></p>";
+			m12306::print_page_begin("登录");
+			std::cout << "<div class=\"message err\">密码错误</div>";
+			std::cout << "<p><a href=\"/m12306index.html\">返回重试</a></p>";
 			PQclear(res);
 			PQfinish(conn);
 			m12306::print_page_end();
@@ -74,13 +68,12 @@ int main() {
 			return 0;
 		}
 
-		m12306::print_page_begin("M12306 Login");
-		std::cout << "<h2>M12306 Login</h2>";
+		m12306::print_page_begin("登录");
 		std::string display_name = PQgetvalue(res, 0, 1);
-		std::cout << "<p class=\"ok\">Welcome, " << m12306::html_escape(display_name)
-				  << " (" << m12306::html_escape(username) << ")</p>";
+		std::cout << "<div class=\"message ok\">欢迎登录，" << m12306::html_escape(display_name)
+				  << "</div>";
 		std::cout << "<p><a href=\"/cgi-bin/home.cgi?username=" << m12306::html_escape(username)
-				  << "\">Enter Home</a></p>";
+				  << "\">进入首页</a></p>";
 	}
 
 	PQclear(res);
