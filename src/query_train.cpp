@@ -101,8 +101,11 @@ int main() {
 	bool loaded_stations = false;
 	int stops = 0;
 
-	std::cout << "<p>Train: <b>" << m12306::html_escape(train_id) << "</b>, Date: "
-			  << m12306::html_escape(date) << ", Seat Type: all</p>";
+	std::cout << "<div class=\"query-info-card\">"
+			  << "<div class=\"info-item\"><label>列车号</label><b>" << m12306::html_escape(train_id) << "</b></div>"
+			  << "<div class=\"info-item\"><label>出发日期</label><b>" << m12306::html_escape(date) << "</b></div>"
+			  << "<div class=\"info-item\"><label>席别</label><b>全部</b></div>"
+			  << "</div>";
 
 	for (size_t si = 0; si < seat_types.size(); ++si) {
 		const std::string &seat_type = seat_types[si];
@@ -170,14 +173,15 @@ int main() {
 	std::cout << "<p>Stops: " << stops << "</p>";
 
 	if (station_sid.size() >= 2) {
+		std::cout << "<div class=\"segment-card\">";
 		std::cout << "<h3>Book Any Segment</h3>";
 		std::cout << "<p>Select any start/end station (start must be before end).</p>";
-		std::cout << "<form id=\"segment_form\" method=\"get\" action=\"/cgi-bin/book.cgi\">"
+		std::cout << "<form id=\"segment_form\" method=\"get\" action=\"/cgi-bin/book.cgi\" class=\"segment-form\">"
 				  << "<input type=\"hidden\" name=\"username\" value=\"" << m12306::html_escape(username) << "\">"
 				  << "<input type=\"hidden\" name=\"train_id\" value=\"" << m12306::html_escape(train_id) << "\">"
 				  << "<input type=\"hidden\" name=\"date\" value=\"" << m12306::html_escape(date) << "\">";
 
-		std::cout << "From: <select id=\"from_sid\" name=\"from_sid\">";
+		std::cout << "<label class=\"field\">From<select id=\"from_sid\" name=\"from_sid\">";
 		for (size_t i = 0; i + 1 < station_sid.size(); ++i) {
 			std::string sid = station_sid[i];
 			std::string station = station_name[i];
@@ -186,9 +190,9 @@ int main() {
 					  << m12306::html_escape(order) << "\">"
 					  << m12306::html_escape(order + std::string(". ") + station) << "</option>";
 		}
-		std::cout << "</select> ";
+		std::cout << "</select></label>";
 
-		std::cout << "To: <select id=\"to_sid\" name=\"to_sid\">";
+		std::cout << "<label class=\"field\">To<select id=\"to_sid\" name=\"to_sid\">";
 		for (size_t i = 1; i < station_sid.size(); ++i) {
 			std::string sid = station_sid[i];
 			std::string station = station_name[i];
@@ -197,16 +201,16 @@ int main() {
 					  << m12306::html_escape(order) << "\">"
 					  << m12306::html_escape(order + std::string(". ") + station) << "</option>";
 		}
-		std::cout << "</select> ";
+		std::cout << "</select></label>";
 
-		std::cout << "Seat Type: <select name=\"seat_type\">";
+		std::cout << "<label class=\"field\">Seat Type<select name=\"seat_type\">";
 		for (size_t i = 0; i < seat_types.size(); ++i) {
 			std::cout << "<option value=\"" << m12306::html_escape(seat_types[i]) << "\">"
 					  << m12306::html_escape(seat_types[i]) << "</option>";
 		}
-		std::cout << "</select> ";
+		std::cout << "</select></label>";
 		std::cout << "<button type=\"submit\">Book Segment</button>";
-		std::cout << "</form>";
+		std::cout << "</form></div>";
 
 		std::cout << "<script>"
 				  "(function(){"

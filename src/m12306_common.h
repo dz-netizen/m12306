@@ -46,40 +46,37 @@ inline PGconn *connect_db() {
     return conn;
 }
 
+inline bool use_login_layout(const std::string &title) {
+    return title == "登录" || title == "注册";
+}
+
+inline bool &page_uses_login_layout() {
+    static bool enabled = false;
+    return enabled;
+}
+
 inline void print_page_begin(const std::string &title) {
     std::cout << "Content-type:text/html\n\n";
+    page_uses_login_layout() = use_login_layout(title);
     std::cout << "<!DOCTYPE html><html lang=\"zh-CN\"><head>"
                  "<meta charset=\"utf-8\">"
                  "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
                  "<title>" << html_escape(title) << " - M12306</title>"
                  "<link rel=\"stylesheet\" href=\"/style.css\">"
-                 "<style>"
-                 ".container{width:100%;max-width:1000px;margin:20px auto;background:#fff;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.15);overflow:hidden;}"
-                 ".header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:30px;text-align:center;}"
-                 ".header h1{font-size:28px;font-weight:600;margin-bottom:8px;}"
-                 ".content{padding:30px;}"
-                 ".message{padding:12px 16px;border-radius:8px;margin-bottom:20px;font-size:14px;font-weight:500;}"
-                 ".message.err{background:#ffebee;color:#c62828;border-left:4px solid #c62828;}"
-                 ".message.ok{background:#e8f5e9;color:#2e7d32;border-left:4px solid #2e7d32;}"
-                 ".nav-menu{list-style:none;margin:20px 0;}"
-                 ".nav-menu li{margin-bottom:12px;}"
-                 ".nav-menu a{display:block;padding:14px 16px;background:#f5f5f5;color:#667eea;text-decoration:none;border-radius:8px;font-weight:500;transition:all 0.3s ease;border-left:4px solid transparent;}"
-                 ".nav-menu a:hover{background:#efefef;border-left-color:#667eea;padding-left:20px;}"
-                 "table{width:100%;border-collapse:collapse;margin:20px 0;}"
-                 "thead{background:#f5f5f5;}"
-                 "th{padding:12px 14px;text-align:left;font-weight:600;font-size:13px;color:#333;border-bottom:2px solid #e0e0e0;}"
-                 "td{padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:14px;}"
-                 "tbody tr:hover{background:#f9f9f9;}"
-                 ".logout-btn{margin-top:30px;padding-top:20px;border-top:1px solid #f0f0f0;text-align:center;}"
-                 ".logout-btn a{display:inline-block;padding:10px 20px;background:#f5f5f5;color:#666;text-decoration:none;border-radius:8px;font-weight:500;transition:all 0.3s ease;}"
-                 ".logout-btn a:hover{background:#e0e0e0;color:#333;}"
-                 "a{color:#667eea;text-decoration:none;}"
-                 "a:hover{color:#764ba2;}"
-                 "</style></head><body><div class=\"container\"><div class=\"header\"><h1>M12306</h1><p>" << html_escape(title) << "</p></div><div class=\"content\">";
+                 "</head>";
+    if (page_uses_login_layout()) {
+        std::cout << "<body class=\"login-page\"><div class=\"login-card\"><div class=\"login-header\"><div class=\"brand\">M12306</div><p class=\"tagline\">" << html_escape(title) << "</p></div><div class=\"login-body\">";
+    } else {
+        std::cout << "<body><div class=\"container\"><div class=\"header\"><h1>M12306</h1><p>" << html_escape(title) << "</p></div><div class=\"content\">";
+    }
 }
 
 inline void print_page_end() {
-    std::cout << "</div></div></body></html>";
+    if (page_uses_login_layout()) {
+        std::cout << "</div></div></body></html>";
+    } else {
+        std::cout << "</div></div></body></html>";
+    }
 }
 
 inline bool exec_ok(PGconn *conn, const char *sql) {

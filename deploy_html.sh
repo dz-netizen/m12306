@@ -8,4 +8,7 @@ for f in html/*.html; do
     sudo cp "$f" "/var/www/html/$name"
 done
 
-echo "HTML deployed to /var/www/html/"
+sudo cp html/style.css /var/www/html/style.css
+sudo cp assets/logo.png /var/www/html/logo.png
+
+echo "HTML and assets deployed to /var/www/html/"

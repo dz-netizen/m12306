@@ -1,53 +1,630 @@
-/* M12306 紫色企业风格基础样式 */
-html,body{height:100%;}
-body{margin:0;padding:24px;background:#f3f6fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#2b2b2b;}
+/* M12306 铁路购票系统样式 */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
 
-.container{width:100%;max-width:1000px;margin:20px auto;background:#fff;border-radius:12px;box-shadow:0 10px 40px rgba(16,24,40,0.06);overflow:hidden;}
-.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:28px 24px;text-align:center;}
-.header h1{font-size:26px;font-weight:700;margin:0 0 6px;letter-spacing:0.5px}
-.header p{margin:0;opacity:0.95}
-
-.content{padding:24px;box-sizing:border-box}
-
-.form-group{margin-bottom:14px}
-.form-group label{display:block;margin-bottom:6px;font-weight:600;color:#333;font-size:14px}
-.form-group input[type="text"],.form-group input[type="password"],.form-group input[type="date"],.form-group select,textarea{width:100%;padding:10px 12px;border:1px solid #e6e9ef;border-radius:8px;background:#fff;box-sizing:border-box;font-size:14px;color:#222}
-
-input[type="submit"],button.btn{display:inline-block;padding:10px 16px;background:#5b5fe4;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600}
-input[type="submit"]:hover,button.btn:hover{background:#4a4fd1}
-
-.form-footer{margin-top:12px;color:#666}
-.form-footer a{color:#e9dbff;text-decoration:none;font-weight:600}
-
-.nav-menu{list-style:none;margin:20px 0;padding:0}
-.nav-menu li{margin-bottom:10px}
-.nav-menu a{display:block;padding:12px 14px;background:#f6f7ff;color:#333;text-decoration:none;border-radius:8px;border-left:4px solid transparent;transition:all .18s ease}
-.nav-menu a:hover{background:#f0f2ff;border-left-color:#5b5fe4;padding-left:18px}
-
-.message{padding:12px 14px;border-radius:8px;margin-bottom:18px;font-size:14px}
-.message.err{background:#fff0f0;color:#b00020;border-left:4px solid #b00020}
-.message.ok{background:#f2fbf4;color:#1b8a3f;border-left:4px solid #1b8a3f}
-
-table{width:100%;border-collapse:collapse;margin:16px 0}
-th,td{padding:12px 14px;text-align:left;border-bottom:1px solid #f0f2f5}
-thead th{background:#fafbff;font-weight:700;color:#333}
-
-.logout-btn{margin-top:20px;padding-top:12px;border-top:1px solid #f0f2f5;text-align:center}
-.logout-btn a{display:inline-block;padding:8px 14px;background:#fafafa;color:#444;text-decoration:none;border-radius:8px}
-
-/* back link and query form centering */
-.back-link{display:inline-block;margin-bottom:14px;color:#5b5fe4;text-decoration:none;font-weight:600}
-.back-link:hover{opacity:0.9}
-.query-form{max-width:560px;margin:0 auto}
-
-/* small screens */
-@media (max-width:640px){
-	body{padding:12px}
-	.header{padding:20px}
-	.header h1{font-size:20px}
-	.content{padding:16px}
+body {
+  margin: 0;
+  padding: 24px 16px;
+  background: #f0f2f8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", Roboto, Arial, sans-serif;
+  color: #2d2d3a;
+  line-height: 1.6;
 }
 
-/* helpers */
-.muted{color:#7a7a7a}
+/* ---- 主容器（非登录页）---- */
+.container {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(102, 126, 234, 0.10), 0 1px 6px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
 
+/* ---- 顶部 header ---- */
+.header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 26px 32px;
+  text-align: center;
+}
+.header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  letter-spacing: 1px;
+}
+.header p {
+  margin: 0;
+  opacity: 0.88;
+  font-size: 14px;
+}
+
+/* ---- 内容区域 ---- */
+.content {
+  padding: 28px 32px;
+}
+
+/* ================================================================
+   登录 / 注册 页（card-on-gradient 风格）
+   ================================================================ */
+body.login-page {
+  height: 100vh;
+  min-height: 600px;
+  padding: 24px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.20), 0 4px 16px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.login-header {
+  padding: 26px 40px 22px;
+  text-align: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+.login-header img.logo {
+  height: 52px;
+  width: auto;
+  display: block;
+  margin: 0 auto 12px;
+  object-fit: contain;
+}
+.login-header .brand {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 4px;
+  letter-spacing: 1px;
+}
+.login-header .tagline {
+  color: rgba(255,255,255,0.9);
+  font-size: 13px;
+  margin: 0;
+}
+.login-body {
+  padding: 28px 40px 36px;
+  background: #fff;
+}
+
+/* ---- 页面信息卡 / 筛选区 / 订票确认 ---- */
+.search-info,
+.query-info-card,
+.segment-card,
+.book-card {
+  background: #faf8ff;
+  border: 1px solid #e7ddfb;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 16px 0;
+  color: #2d2d3a;
+}
+.search-info b,
+.query-info-card b,
+.segment-card b,
+.book-card b {
+  color: #151515;
+}
+.query-info-card .info-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+.query-info-card .info-item:last-child { margin-bottom: 0; }
+.query-info-card .info-item label {
+  min-width: 76px;
+  color: #5e4a8a;
+}
+.segment-card p,
+.book-card p,
+.search-info p {
+  margin: 0 0 10px;
+}
+.segment-form,
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  align-items: end;
+  background: #faf8ff;
+  border: 1px solid #e7ddfb;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 14px 0 18px;
+}
+.segment-form label,
+.filter-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #3d3d5c;
+}
+.segment-form select,
+.segment-form input[type="text"],
+.filter-form select,
+.filter-form input[type="text"] {
+  width: 100%;
+}
+.segment-form button,
+.filter-form button {
+  width: 100%;
+  min-width: 120px;
+}
+
+h2, h3 {
+  margin: 18px 0 12px;
+  color: #2b2540;
+}
+
+/* ---- 表单元素 ---- */
+.form-group {
+  margin-bottom: 16px;
+}
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #3d3d5c;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="tel"],
+.form-group input[type="date"],
+.form-group input[type="time"],
+.form-group select,
+textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1.5px solid #e4e7f0;
+  border-radius: 10px;
+  background: #fafbff;
+  font-size: 14px;
+  color: #2d2d3a;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+  font-family: inherit;
+  appearance: none;
+}
+.form-group input:focus,
+.form-group select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.14);
+  background: #fff;
+}
+
+/* 提交按钮 */
+input[type="submit"],
+button.btn {
+  display: block;
+  width: 100%;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 1px;
+  transition: opacity 0.2s, transform 0.12s;
+  margin-top: 6px;
+  font-family: inherit;
+}
+input[type="submit"]:hover,
+button.btn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.30);
+}
+input[type="submit"]:active,
+button.btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ---- 注册/登录 页脚链接 ---- */
+.form-footer {
+  margin-top: 20px;
+  text-align: center;
+  color: #8a8ab5;
+  font-size: 14px;
+}
+.form-footer a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 600;
+}
+.form-footer a:hover {
+  color: #764ba2;
+  text-decoration: underline;
+}
+
+/* ---- 消息提示 ---- */
+.message {
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.message.err {
+  background: #fff0f2;
+  color: #c0392b;
+  border-left: 4px solid #c0392b;
+}
+.message.ok {
+  background: #f0faf4;
+  color: #1b8a3f;
+  border-left: 4px solid #1b8a3f;
+}
+
+/* ---- 导航菜单 ---- */
+.nav-menu {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.nav-menu li { margin: 0; }
+.nav-menu a {
+  display: flex;
+  align-items: center;
+  padding: 16px 18px;
+  background: #f6f7ff;
+  color: #3d3d5c;
+  text-decoration: none;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  border: 1.5px solid transparent;
+  transition: all 0.2s ease;
+  gap: 8px;
+}
+.nav-menu a:hover {
+  background: #eef0ff;
+  border-color: #667eea;
+  color: #667eea;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+/* ---- 表格 ---- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+}
+thead th {
+  background: #f4efff;
+  color: #1d1d1d;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 11px 14px;
+  text-align: center;
+  white-space: nowrap;
+}
+thead th:first-child { border-radius: 8px 0 0 0; }
+thead th:last-child  { border-radius: 0 8px 0 0; }
+tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #f0f2f8;
+  color: #222;
+  vertical-align: middle;
+  text-align: center;
+}
+tbody tr:nth-child(odd) td { background: #ffffff; }
+tbody tr:nth-child(even) td { background: #fcfbff; }
+tbody tr:hover td { background: #f7f4ff; }
+tbody tr:last-child td { border-bottom: none; }
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: #5b5fe4;
+  text-decoration: none;
+  font-weight: 700;
+}
+.back-link:hover {
+  color: #4b4fd0;
+}
+
+.action-link {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: #f2edff;
+  color: #4b3f73;
+  text-decoration: none;
+  font-weight: 600;
+}
+.action-link:hover {
+  background: #e8defc;
+}
+
+.book-summary {
+  display: grid;
+  gap: 12px;
+}
+.book-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: stretch;
+}
+.book-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e7ddfb;
+  border-radius: 10px;
+  min-width: 140px;
+  flex: 1 1 180px;
+}
+.book-row .label {
+  color: #5e4a8a;
+  font-weight: 700;
+}
+.book-row > span,
+.book-row > b {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+}
+.book-row > .label {
+  color: #5e4a8a;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.book-row > b,
+.book-row > span:not(.label) {
+  color: #222;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.book-route {
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e7ddfb;
+  border-radius: 10px;
+  color: #2d2d3a;
+  line-height: 1.5;
+}
+
+.trip-times {
+  display: grid;
+  gap: 6px;
+  line-height: 1.4;
+}
+.trip-times div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.trip-label {
+  color: #5e4a8a;
+  font-weight: 700;
+  min-width: 56px;
+}
+.trip-value {
+  color: #222;
+  font-weight: 600;
+}
+
+.segment-form .field,
+.filter-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.query-section {
+  margin-bottom: 22px;
+}
+tbody tr:nth-child(even) td { background-color: #f9fafe; }
+tbody tr:hover td { background: #f0f4ff; }
+
+table a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+table a:hover {
+  color: #764ba2;
+  text-decoration: underline;
+}
+
+/* ---- 退出登录 ---- */
+.logout-btn {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f2f5;
+  text-align: center;
+}
+.logout-btn a {
+  display: inline-block;
+  padding: 10px 24px;
+  background: #f5f6ff;
+  color: #667eea;
+  text-decoration: none;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  border: 1.5px solid #e4e7f0;
+  transition: all 0.2s;
+}
+.logout-btn a:hover {
+  background: #eef0ff;
+  border-color: #667eea;
+}
+
+/* ---- 返回链接 ---- */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 18px;
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  gap: 4px;
+  transition: color 0.2s;
+}
+.back-link:hover { color: #764ba2; }
+
+/* ---- 查询表单居中 ---- */
+.query-form {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* ---- 筛选表单（订单页） ---- */
+.filter-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: #f8f9ff;
+  border-radius: 10px;
+  border: 1px solid #e4e7f0;
+}
+.filter-form label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d3d5c;
+  flex: 1 1 220px;
+}
+.filter-form input[type="date"],
+.filter-form select {
+  padding: 7px 10px;
+  border: 1.5px solid #e4e7f0;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+  color: #2d2d3a;
+  outline: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.filter-form input[type="date"]:focus,
+.filter-form select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.14);
+}
+.filter-form button {
+  width: auto;
+  min-width: 92px;
+  margin-top: 0;
+  align-self: flex-end;
+  padding: 10px 18px;
+}
+
+.filter-form button[type="submit"] {
+  flex: 0 0 auto;
+}
+
+/* ---- 查询信息栏 ---- */
+.search-info {
+  background: #f7f5ff;
+  border-left: 3px solid #667eea;
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  color: #3d3d5c;
+}
+
+.query-info-card {
+  background: #f8f9ff;
+  border-left: 4px solid #667eea;
+  border-radius: 0 8px 8px 0;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  font-size: 14px;
+}
+.query-info-card .info-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #2d2d3a;
+}
+.query-info-card label {
+  font-weight: 600;
+  color: #667eea;
+  margin: 0;
+}
+.filter-form button {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: opacity 0.2s;
+}
+.filter-form button:hover { opacity: 0.88; }
+
+/* ---- 全局链接 ---- */
+a { color: #667eea; text-decoration: none; }
+a:hover { color: #764ba2; }
+
+/* ---- 辅助类 ---- */
+.muted { color: #8a8ab5; }
+
+h3 {
+  color: #3d3d5c;
+  font-size: 16px;
+  margin: 20px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #f0f2f8;
+}
+
+/* ---- 响应式 ---- */
+@media (max-width: 640px) {
+  body { padding: 12px 8px; }
+  .content { padding: 18px 16px; }
+  .header { padding: 20px 16px; }
+  .header h1 { font-size: 20px; }
+  .login-header { padding: 28px 24px 20px; }
+  .login-body { padding: 20px 24px 28px; }
+  .container { border-radius: 12px; }
+  .nav-menu { grid-template-columns: 1fr; }
+  thead th, tbody td { padding: 9px 10px; font-size: 12px; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .filter-form { flex-direction: column; align-items: flex-start; }
+}

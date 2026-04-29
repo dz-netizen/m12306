@@ -39,9 +39,17 @@ struct TransferGroup {
 	std::string from2_name;
 	std::string to2;
 	std::string to2_name;
-	std::string times;
+	std::string depart1;
+	std::string arrive1;
+	std::string depart2;
+	std::string arrive2;
 	std::map<std::string, TransferSeatRow> seat_map;
 };
+
+static std::string short_time(const std::string &s) {
+	if (s.size() >= 5) return s.substr(0, 5);
+	return s;
+}
 
 int main() {
 	cgicc::Cgicc form;
@@ -55,10 +63,9 @@ int main() {
 	if (date.empty()) date = m12306::tomorrow_date();
 	if (time.empty()) time = "00:00";
 
-	m12306::print_page_begin("Query Route");
-	std::cout << "<h2>Query Route</h2>";
-	std::cout << "<p><a href=\"/cgi-bin/home.cgi?username=" << m12306::html_escape(username)
-			  << "\">Back Home</a></p>";
+	m12306::print_page_begin("查询线路");
+	std::cout << "<a href=\"/cgi-bin/home.cgi?username=" << m12306::html_escape(username)
+			  << "\" class=\"back-link\">← 返回首页</a>";
 
 	if (from_city.empty() || to_city.empty()) {
 		std::cout << "<p class=\"err\">from_city and to_city are required.</p>";
@@ -80,18 +87,12 @@ int main() {
 		return 1;
 	}
 
-	std::cout << "<p>From: <b>" << m12306::html_escape(from_city)
-			  << "</b> To: <b>" << m12306::html_escape(to_city)
-			  << "</b>, Date: " << m12306::html_escape(date)
-			  << ", Time >= " << m12306::html_escape(time)
-			  << ", Seat Type: all</p>";
-	if (!from_station.empty() || !to_station.empty()) {
-		std::cout << "<p>Station Filter: "
-				  << (from_station.empty() ? std::string("Any") : m12306::html_escape(from_station))
-				  << " -> "
-				  << (to_station.empty() ? std::string("Any") : m12306::html_escape(to_station))
-				  << "</p>";
-	}
+	std::cout << "<div class=\"query-info-card\">"
+			  << "<div class=\"info-item\"><label>出发城市</label><b>" << m12306::html_escape(from_city) << "</b></div>"
+			  << "<div class=\"info-item\"><label>到达城市</label><b>" << m12306::html_escape(to_city) << "</b></div>"
+			  << "<div class=\"info-item\"><label>出发日期</label><b>" << m12306::html_escape(date) << "</b></div>"
+			  << "<div class=\"info-item\"><label>起始时间</label><b>≥ " << m12306::html_escape(time) << "</b></div>"
+			  << "</div>";
 
 	const char *city_station_sql =
 		"SELECT s.station_name "
@@ -103,14 +104,14 @@ int main() {
 	PGresult *from_station_res = PQexecParams(conn, city_station_sql, 1, NULL, from_city_param, NULL, NULL, 0);
 	PGresult *to_station_res = PQexecParams(conn, city_station_sql, 1, NULL, to_city_param, NULL, NULL, 0);
 
-	std::cout << "<form method=\"get\" action=\"/cgi-bin/query_route.cgi\">"
+	std::cout << "<form method=\"get\" action=\"/cgi-bin/query_route.cgi\" class=\"filter-form\">"
 			  << "<input type=\"hidden\" name=\"username\" value=\"" << m12306::html_escape(username) << "\">"
 			  << "<input type=\"hidden\" name=\"from_city\" value=\"" << m12306::html_escape(from_city) << "\">"
 			  << "<input type=\"hidden\" name=\"to_city\" value=\"" << m12306::html_escape(to_city) << "\">"
 			  << "<input type=\"hidden\" name=\"date\" value=\"" << m12306::html_escape(date) << "\">"
 			  << "<input type=\"hidden\" name=\"time\" value=\"" << m12306::html_escape(time) << "\">";
-	std::cout << "From Station: <select name=\"from_station\"><option value=\"\">(Any in "
-			  << m12306::html_escape(from_city) << ")</option>";
+	std::cout << "<label>出发站<select name=\"from_station\"><option value=\"\">(全部 "
+			  << m12306::html_escape(from_city) << " 站)</option>";
 	if (PQresultStatus(from_station_res) == PGRES_TUPLES_OK) {
 		for (int i = 0; i < PQntuples(from_station_res); ++i) {
 			std::string sname = PQgetvalue(from_station_res, i, 0);
@@ -119,10 +120,10 @@ int main() {
 			std::cout << ">" << m12306::html_escape(sname) << "</option>";
 		}
 	}
-	std::cout << "</select> ";
+	std::cout << "</select></label>";
 
-	std::cout << "To Station: <select name=\"to_station\"><option value=\"\">(Any in "
-			  << m12306::html_escape(to_city) << ")</option>";
+	std::cout << "<label>到达站<select name=\"to_station\"><option value=\"\">(全部 "
+			  << m12306::html_escape(to_city) << " 站)</option>";
 	if (PQresultStatus(to_station_res) == PGRES_TUPLES_OK) {
 		for (int i = 0; i < PQntuples(to_station_res); ++i) {
 			std::string sname = PQgetvalue(to_station_res, i, 0);
@@ -131,7 +132,7 @@ int main() {
 			std::cout << ">" << m12306::html_escape(sname) << "</option>";
 		}
 	}
-	std::cout << "</select> <button type=\"submit\">Apply Station Filter</button></form>";
+	std::cout << "</select></label><button type=\"submit\">筛选</button></form>";
 	PQclear(from_station_res);
 	PQclear(to_station_res);
 
@@ -212,8 +213,8 @@ int main() {
 		return 1;
 	}
 
-	std::cout << "<h3>Direct Trains</h3>";
-	std::cout << "<table><tr><th>Train</th><th>From</th><th>To</th><th>Depart</th><th>Arrive</th><th>Seat Type</th><th>Price</th><th>Left</th><th>Book</th></tr>";
+	std::cout << "<h3>直达列车</h3>";
+	std::cout << "<table><thead><tr><th>车次</th><th>出发站</th><th>到达站</th><th>发车</th><th>到站</th><th>席别</th><th>票价</th><th>余票</th><th>购票</th></tr></thead><tbody>";
 	int drows = PQntuples(direct);
 	std::vector<std::string> seat_order;
 	seat_order.push_back("商务座");
@@ -280,15 +281,15 @@ int main() {
 						  << "&from_sid=" << m12306::html_escape(g.from_sid)
 						  << "&to_sid=" << m12306::html_escape(g.to_sid)
 						  << "&date=" << m12306::html_escape(date)
-						  << "&seat_type=" << m12306::html_escape(seat.seat_type) << "\">Book</a></td>";
+						  << "&seat_type=" << m12306::html_escape(seat.seat_type) << "\">购票</a></td>";
 			} else {
 				std::cout << "<td>-</td>";
 			}
 			std::cout << "</tr>";
 		}
 	}
-	if (direct_groups.empty()) std::cout << "<tr><td colspan=\"9\">No direct routes.</td></tr>";
-	std::cout << "</table>";
+	if (direct_groups.empty()) std::cout << "<tr><td colspan=\"9\">暂无直达车次。</td></tr>";
+	std::cout << "</tbody></table>";
 	PQclear(direct);
 
 	const char *transfer_sql =
@@ -336,14 +337,18 @@ int main() {
 		return 1;
 	}
 
-	std::cout << "<h3>One-Transfer Routes</h3>";
-	std::cout << "<table><tr><th>Leg1</th><th>Transfer City</th><th>Leg2</th><th>Times</th><th>Seat Type</th><th>Total Price</th><th>Total Left</th><th>Book</th></tr>";
+	std::cout << "<h3>中转路线</h3>";
+	std::cout << "<table><thead><tr><th>第一段</th><th>中转城市</th><th>第二段</th><th>时间</th><th>席别</th><th>总价</th><th>余票</th><th>购票</th></tr></thead><tbody>";
 	int trows = PQntuples(transfer);
 	std::vector<TransferGroup> transfer_groups;
 	std::map<std::string, size_t> transfer_index;
 	for (int i = 0; i < trows; ++i) {
-		std::string times = std::string(PQgetvalue(transfer, i, 12)) + " / " + PQgetvalue(transfer, i, 13)
-						  + " ; " + PQgetvalue(transfer, i, 14) + " / " + PQgetvalue(transfer, i, 15);
+		std::string depart1 = PQgetvalue(transfer, i, 12);
+		std::string arrive1 = PQgetvalue(transfer, i, 13);
+		std::string depart2 = PQgetvalue(transfer, i, 14);
+		std::string arrive2 = PQgetvalue(transfer, i, 15);
+		std::string times = short_time(depart1) + "|" + short_time(arrive1) + "|"
+						  + short_time(depart2) + "|" + short_time(arrive2);
 		std::string key = std::string(PQgetvalue(transfer, i, 0)) + "|"
 						 + PQgetvalue(transfer, i, 1) + "|"
 						 + PQgetvalue(transfer, i, 3) + "|"
@@ -366,7 +371,10 @@ int main() {
 			g.from2_name = PQgetvalue(transfer, i, 8);
 			g.to2 = PQgetvalue(transfer, i, 9);
 			g.to2_name = PQgetvalue(transfer, i, 10);
-			g.times = times;
+			g.depart1 = depart1;
+			g.arrive1 = arrive1;
+			g.depart2 = depart2;
+			g.arrive2 = arrive2;
 			transfer_groups.push_back(g);
 			idx = transfer_groups.size() - 1;
 			transfer_index[key] = idx;
@@ -398,7 +406,10 @@ int main() {
 				std::cout << "<td rowspan=\"3\">" << m12306::html_escape(leg1) << "</td>"
 						  << "<td rowspan=\"3\">" << m12306::html_escape(g.transfer_city) << "</td>"
 						  << "<td rowspan=\"3\">" << m12306::html_escape(leg2) << "</td>"
-						  << "<td rowspan=\"3\">" << m12306::html_escape(g.times) << "</td>";
+						<< "<td rowspan=\"3\"><div class=\"trip-times\">"
+						<< "<div><span class=\"trip-label\">第一段</span><span class=\"trip-value\">" << m12306::html_escape(short_time(g.depart1)) << " → " << m12306::html_escape(short_time(g.arrive1)) << "</span></div>"
+						<< "<div><span class=\"trip-label\">第二段</span><span class=\"trip-value\">" << m12306::html_escape(short_time(g.depart2)) << " → " << m12306::html_escape(short_time(g.arrive2)) << "</span></div>"
+						  << "</div></td>";
 			}
 			std::cout << "<td>" << m12306::html_escape(seat.seat_type) << "</td>"
 					  << "<td>" << m12306::html_escape(seat.total_price) << "</td>"
@@ -413,21 +424,21 @@ int main() {
 						  << "&from2=" << m12306::html_escape(g.from2)
 						  << "&to2=" << m12306::html_escape(g.to2)
 						  << "&date=" << m12306::html_escape(date)
-						  << "&seat_type=" << m12306::html_escape(seat.seat_type) << "\">Book</a></td>";
+						  << "&seat_type=" << m12306::html_escape(seat.seat_type) << "\">购票</a></td>";
 			} else {
 				std::cout << "<td>-</td>";
 			}
 			std::cout << "</tr>";
 		}
 	}
-	if (transfer_groups.empty()) std::cout << "<tr><td colspan=\"8\">No transfer routes.</td></tr>";
-	std::cout << "</table>";
+	if (transfer_groups.empty()) std::cout << "<tr><td colspan=\"8\">暂无中转路线。</td></tr>";
+	std::cout << "</tbody></table>";
 	PQclear(transfer);
 
 	std::cout << "<p><a href=\"/query_route.html?username=" << m12306::html_escape(username)
 			  << "&from_city=" << m12306::html_escape(to_city)
 			  << "&to_city=" << m12306::html_escape(from_city)
-			  << "&date=2026-05-02&time=00:00\">Return Trip Query</a></p>";
+			  << "&date=2026-05-02&time=00:00\">查询回程</a></p>";
 
 	PQfinish(conn);
 	m12306::print_page_end();
