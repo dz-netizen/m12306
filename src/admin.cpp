@@ -7,19 +7,18 @@ int main() {
 	std::string username = m12306::get_form_value(form, "username");
 	std::string view_user = m12306::get_form_value(form, "view_user");
 
-	m12306::print_page_begin("Admin Panel");
-	std::cout << "<h2>Admin Panel</h2>";
-	std::cout << "<p><a href=\"/m12306index.html\">LogOut</a></p>";
+	m12306::print_page_begin("管\u7406\u9762\u677f");
+	std::cout << "<p><a href=\"/m12306index.html\" class=\"back-link\">← \u9000\u51fa\u767b\u5f55</a></p>";
 
 	if (!m12306::is_admin(username)) {
-		std::cout << "<p class=\"err\">Forbidden: admin only.</p>";
+		std::cout << "<div class=\"message err\">\u7981\u6b62\u4e0a\u4e0a\uff1a\u4ec5\u7ba1\u7406\u5458\u53ef\u8bbf\u95ee</div>";
 		m12306::print_page_end();
 		return 0;
 	}
 
 	PGconn *conn = m12306::connect_db();
 	if (PQstatus(conn) != CONNECTION_OK) {
-		std::cout << "<p class=\"err\">DB connection failed.</p>";
+		std::cout << "<div class=\"message err\">\u6570\u636e\u5e93\u8fde\u63a5\u5931\u8d25\u3002</div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 1;
@@ -32,8 +31,8 @@ int main() {
 	PQclear(r1);
 	PQclear(r2);
 
-	std::cout << "<p><b>Total valid orders:</b> " << m12306::html_escape(total_orders)
-			  << " , <b>Total valid revenue:</b> " << m12306::html_escape(total_price) << "</p>";
+	std::cout << "<p><b>\u6709\u6548\u8ba2\u5355\u603b\u6570:</b> " << m12306::html_escape(total_orders)
+			  << " , <b>\u6709\u6548\u6536\u5165\u603b\u8ba1:</b> " << m12306::html_escape(total_price) << "</p>";
 
 	PGresult *top = PQexec(conn,
 		"SELECT t.train_id, COALESCE(h.cnt, 0)::text AS cnt "
@@ -46,7 +45,7 @@ int main() {
 		") h ON h.train_id=t.train_id "
 		"ORDER BY COALESCE(h.cnt, 0) DESC, t.train_id ASC "
 		"LIMIT 10");
-	std::cout << "<h3>Top 10 Hot Trains</h3><table><tr><th>Train</th><th>Count</th></tr>";
+	std::cout << "<h3>\u7ebf\u4e0a\u70ed\u9896\u5217\u8f66 TOP 10</h3><table><tr><th>\u5217\u8f66\u53f7</th><th>\u8ba2\u7968\u6570</th></tr>";
 	if (PQresultStatus(top) == PGRES_TUPLES_OK) {
 		for (int i = 0; i < PQntuples(top); ++i) {
 			std::cout << "<tr><td>" << m12306::html_escape(PQgetvalue(top, i, 0))
@@ -57,7 +56,7 @@ int main() {
 	PQclear(top);
 
 	PGresult *users = PQexec(conn, "SELECT username, name, phone FROM user_info ORDER BY user_id");
-	std::cout << "<h3>Registered Users</h3><table><tr><th>Username</th><th>Name</th><th>Phone</th><th>Orders</th></tr>";
+	std::cout << "<h3>\u5df2\u6ce8\u518c\u7528\u6237</h3><table><tr><th>\u7528\u6237\u540d</th><th>\u771f\u5b9e\u59d3\u540d</th><th>\u624b\u673a\u53f7</th><th>\u8ba2\u5355</th></tr>";
 	if (PQresultStatus(users) == PGRES_TUPLES_OK) {
 		for (int i = 0; i < PQntuples(users); ++i) {
 			std::string u = PQgetvalue(users, i, 0);
@@ -65,14 +64,14 @@ int main() {
 					  << "</td><td>" << m12306::html_escape(PQgetvalue(users, i, 1))
 					  << "</td><td>" << m12306::html_escape(PQgetvalue(users, i, 2))
 					  << "</td><td><a href=\"/cgi-bin/admin.cgi?username=admin&view_user="
-					  << m12306::html_escape(u) << "\">View</a></td></tr>";
+					  << m12306::html_escape(u) << "\">\u67e5\u770b</a></td></tr>";
 		}
 	}
 	std::cout << "</table>";
 	PQclear(users);
 
 	if (!view_user.empty()) {
-		std::cout << "<h3>Orders of " << m12306::html_escape(view_user) << "</h3>";
+		std::cout << "<h3>" << m12306::html_escape(view_user) << " \u7684\u8ba2\u5355\u8be6\u60c5</h3>";
 		const char *sql =
 			"SELECT o.order_id::text, o.status, o.total_price::text, o.create_time::date::text, "
 			"       COALESCE(train_info.train_ids,'-') AS train_ids, "

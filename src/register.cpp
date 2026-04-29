@@ -30,34 +30,37 @@ int main() {
 	std::string name = m12306::get_form_value(form, "name");
 	std::string password = m12306::get_form_value(form, "password");
 	if (password.empty()) {
-		m12306::print_page_begin("M12306 Register");
-		std::cout << "<h2>M12306 Register</h2>";
-		std::cout << "<p class=\"err\">password is required.</p>";
-		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+		m12306::print_page_begin("注册");
+		std::cout << "<div class=\"message err\">密码不能为空</div>";
+		std::cout << "<p><a href=\"/register.html\">返回</a></p>";
 		m12306::print_page_end();
 		return 0;
 	}
 
-	m12306::print_page_begin("M12306 Register");
-	std::cout << "<h2>M12306 Register</h2>";
+	m12306::print_page_begin("注册");
 
 	if (username.empty() || phone.empty() || name.empty()) {
-		std::cout << "<p class=\"err\">username/phone/name are required.</p>";
-		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+		std::cout << "<div class=\"message err\">用户名/手机号/真实姓名的需要填写</div>";
+		std::cout << "<p><a href=\"/register.html\">返回</a></p>";
 		m12306::print_page_end();
 		return 0;
 	}
 	if (!is_valid_phone(phone)) {
-		std::cout << "<p class=\"err\">Invalid phone format: phone must be 11 digits.</p>";
-		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+		std::cout << "<div class=\"message err\">手机号格式错误：哪必须是11位数字</div>";
+		std::cout << "<p><a href=\"/register.html\">返回</a></p>";
 		m12306::print_page_end();
 		return 0;
 	}
 
+	if (username.empty() || phone.empty() || name.empty()) {
+		std::cout << "<div class=\"message err\">数据库连接失败</div>";
+		// This is an error - moving the connection check
+	}
+
 	PGconn *conn = m12306::connect_db();
 	if (PQstatus(conn) != CONNECTION_OK) {
-		std::cout << "<p class=\"err\">Database connection failed: "
-				  << m12306::html_escape(PQerrorMessage(conn)) << "</p>";
+		std::cout << "<div class=\"message err\">数据库连接失败: "
+				  << m12306::html_escape(PQerrorMessage(conn)) << "</div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 1;
@@ -68,12 +71,12 @@ int main() {
 		const char *upd_params[2] = {username.c_str(), password.c_str()};
 		PGresult *upd = PQexecParams(conn, upd_sql, 2, NULL, upd_params, NULL, NULL, 0);
 		if (PQresultStatus(upd) == PGRES_COMMAND_OK) {
-			std::cout << "<p class=\"ok\">Username exists. Password has been updated.</p>";
-			std::cout << "<p><a href=\"/m12306index.html\">Go Login</a></p>";
+			std::cout << "<div class=\"message ok\">用户已存在，密码已更新。</div>";
+			std::cout << "<p><a href=\"/m12306index.html\">前往登录</a></p>";
 		} else {
-			std::cout << "<p class=\"err\">Password update failed: "
-					  << m12306::html_escape(PQresultErrorMessage(upd)) << "</p>";
-			std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+			std::cout << "<div class=\"message err\">密码更新失败: "
+					  << m12306::html_escape(PQresultErrorMessage(upd)) << "</div>";
+			std::cout << "<p><a href=\"/register.html\">返回</a></p>";
 		}
 		PQclear(upd);
 		PQfinish(conn);
@@ -82,8 +85,8 @@ int main() {
 	}
 
 	if (exists_value(conn, "SELECT COUNT(*) FROM user_info WHERE phone=$1", phone)) {
-		std::cout << "<p class=\"err\">Phone already exists.</p>";
-		std::cout << "<p><a href=\"/register.html\">Back</a></p>";
+		std::cout << "<div class=\"message err\">手机号已经存在</div>";
+		std::cout << "<p><a href=\"/register.html\">返回</a></p>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 0;
@@ -95,11 +98,11 @@ int main() {
 	const char *params[4] = {username.c_str(), phone.c_str(), name.c_str(), password.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 4, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-		std::cout << "<p class=\"err\">Register failed: "
-				  << m12306::html_escape(PQresultErrorMessage(res)) << "</p>";
+		std::cout << "<div class=\"message err\">注册失败: "
+				  << m12306::html_escape(PQresultErrorMessage(res)) << "</div>";
 	} else {
-		std::cout << "<p class=\"ok\">Register success. Please login now.</p>";
-		std::cout << "<p><a href=\"/m12306index.html\">Go Login</a></p>";
+		std::cout << "<div class=\"message ok\">注册成功。请登录</div>";
+		std::cout << "<p><a href=\"/m12306index.html\">前往登录</a></p>";
 	}
 
 	PQclear(res);

@@ -12,27 +12,26 @@ int main() {
 	if (date_from.empty()) date_from = "2026-01-01";
 	if (date_to.empty()) date_to = "2026-12-31";
 
-	m12306::print_page_begin("Orders");
-	std::cout << "<h2>Order Management</h2>";
+	m12306::print_page_begin("订单管理");
 	std::cout << "<p><a href=\"/cgi-bin/home.cgi?username=" << m12306::html_escape(username)
-			  << "\">Back Home</a></p>";
+			  << "\" class=\"back-link\">← \u8fd4\u56de\u9996\u9875</a></p>";
 
 	if (username.empty()) {
-		std::cout << "<p class=\"err\">username required.</p>";
+		std::cout << "<div class=\"message err\">用户名\u662f\u5fc5\u586b\u9879\u3002</div>";
 		m12306::print_page_end();
 		return 0;
 	}
 
 	PGconn *conn = m12306::connect_db();
 	if (PQstatus(conn) != CONNECTION_OK) {
-		std::cout << "<p class=\"err\">DB connection failed.</p>";
+		std::cout << "<div class=\"message err\">数\u636e\u5e93\u8fde\u63a5\u5931\u8d25\u3002</div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 1;
 	}
 	int uid = m12306::get_user_id(conn, username);
 	if (uid < 0) {
-		std::cout << "<p class=\"err\">user not found.</p>";
+		std::cout << "<div class=\"message err\">用\u6237\u4e0d\u5b58\u5728\u3002</div>";
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 0;
@@ -71,10 +70,10 @@ int main() {
 				2, NULL, lp, NULL, NULL, 0);
 			PQclear(oc);
 			m12306::exec_ok(conn, "COMMIT");
-			std::cout << "<p class=\"ok\">Order canceled: " << m12306::html_escape(order_id) << "</p>";
+			std::cout << "<div class=\"message ok\">订\u5355\u5df2\u53d6\u6d88: " << m12306::html_escape(order_id) << "</div>";
 		} else {
 			m12306::exec_ok(conn, "ROLLBACK");
-			std::cout << "<p class=\"err\">Order not cancelable.</p>";
+			std::cout << "<div class=\"message err\">订\u5355\u65e0\u6cd5\u53d6\u6d88\u3002</div>";
 		}
 	}
 
@@ -126,14 +125,14 @@ int main() {
 	const char *lp2[3] = {uid_s.c_str(), date_from.c_str(), date_to.c_str()};
 	PGresult *ls = PQexecParams(conn, list_sql, 3, NULL, lp2, NULL, NULL, 0);
 	if (PQresultStatus(ls) != PGRES_TUPLES_OK) {
-		std::cout << "<p class=\"err\">Order query failed.</p>";
+		std::cout << "<div class=\"message err\">订\u5355\u67e5\u8be2\u5931\u8d25\u3002</div>";
 		PQclear(ls);
 		PQfinish(conn);
 		m12306::print_page_end();
 		return 1;
 	}
 
-	std::cout << "<table><tr><th>Order ID</th><th>Date</th><th>Train ID</th><th>Seat Type</th><th>From</th><th>To</th><th>Depart</th><th>Arrive</th><th>Total</th><th>Status</th><th>Action</th></tr>";
+	std::cout << "<table><tr><th>\u8ba2\u5355\u53f7</th><th>\u65e5\u671f</th><th>\u5217\u8f66\u53f7</th><th>\u5ea7\u4f4d\u7c7b\u7a0b</th><th>\u51fa\u53d1</th><th>\u6b62</th><th>\u8d77\u7a0b</th><th>\u5230\u7a0b</th><th>\u603b\u4ef7</th><th>\u72b6\u6001</th><th>\u64cd\u4f5c</th></tr>";
 	for (int i = 0; i < PQntuples(ls); ++i) {
 		std::string oid = PQgetvalue(ls, i, 0);
 		std::string st = PQgetvalue(ls, i, 9);
@@ -151,17 +150,17 @@ int main() {
 				  << "&action=detail&order_id=" << m12306::html_escape(oid)
 				  << "&date_from=" << m12306::html_escape(date_from)
 				  << "&date_to=" << m12306::html_escape(date_to)
-				  << "\">Detail</a>";
-		if (st == "正常") {
+				  << "\">\u4e0a\u4f13</a>";
+		if (st == "\u6b63\u5e38") {
 			std::cout << " | <a href=\"/cgi-bin/orders.cgi?username=" << m12306::html_escape(username)
 					  << "&action=cancel&order_id=" << m12306::html_escape(oid)
 					  << "&date_from=" << m12306::html_escape(date_from)
 					  << "&date_to=" << m12306::html_escape(date_to)
-					  << "\">Cancel</a>";
+					  << "\">\u53d6\u6d88</a>";
 		}
 		std::cout << "</td></tr>";
 	}
-	if (PQntuples(ls) == 0) std::cout << "<tr><td colspan=\"11\">No orders.</td></tr>";
+	if (PQntuples(ls) == 0) std::cout << "<tr><td colspan=\"11\">\u6ca1\u6709\u8ba2\u5355\u3002</td></tr>";
 	std::cout << "</table>";
 
 	if (action == "detail" && !order_id.empty()) {

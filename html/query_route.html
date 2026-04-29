@@ -1,22 +1,44 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
 	<meta charset="utf-8">
-	<title>Query Route</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>M12306 - 查询线路</title>
+	<link rel="stylesheet" href="/style.css">
 </head>
-<body bgcolor="#f7f7f7" text="#111111">
-	<h2>Query Route</h2>
-	<p>
-		<a id="back_home" href="/cgi-bin/home.cgi">Back Home</a>
-	</p>
-	<form method="get" action="/cgi-bin/query_route.cgi">
-		Username: <input type="text" name="username" id="username" required><br><br>
-		From City: <input type="text" name="from_city" id="from_city" required><br><br>
-		To City: <input type="text" name="to_city" id="to_city" required><br><br>
-		Date: <input type="date" name="date" id="date"><br><br>
-		Time: <input type="time" name="time" id="time" value="00:00"><br><br>
-		<input type="submit" value="Search">
-	</form>
+<body>
+	<div class="container">
+		<div class="header">
+			<h1>M12306</h1>
+			<p>查询线路信息</p>
+		</div>
+		<div class="content">
+			<a id="back_home" href="/cgi-bin/home.cgi" class="back-link">← 返回首页</a>
+			<form method="get" action="/cgi-bin/query_route.cgi" class="query-form">
+				<div class="form-group">
+					<label for="username">用户名</label>
+					<input type="text" id="username" name="username" required>
+				</div>
+				<div class="form-group">
+					<label for="from_city">出发城市</label>
+					<input type="text" id="from_city" name="from_city" required>
+				</div>
+				<div class="form-group">
+					<label for="to_city">到达城市</label>
+					<input type="text" id="to_city" name="to_city" required>
+				</div>
+				<div class="form-group">
+					<label for="date">出发日期</label>
+					<input type="date" id="date" name="date" required>
+				</div>
+				<div class="form-group">
+					<label for="time">出发时间</label>
+					<input type="time" id="time" name="time" value="00:00">
+				</div>
+				<input type="submit" value="查 询">
+			</form>
+		</div>
+	</div>
 
 	<script>
 		const q = new URLSearchParams(window.location.search);
