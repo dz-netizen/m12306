@@ -195,10 +195,9 @@ int main() {
 		"  AND COALESCE((SELECT si.remaining FROM seat_inventory si "
 		"                 WHERE si.train_id=tp.train_id AND si.travel_date=$3::date AND si.seat_type=tp.seat_type "
 		"                   AND si.from_station=tp.from_station AND si.to_station=tp.to_station), 5) > 0 "
-		"ORDER BY tp.price ASC, tp.seat_type ASC, "
+		"ORDER BY ts1.departure_time ASC, tp.price ASC, tp.seat_type ASC, "
 		"  CASE WHEN ts2.arrival_time>=ts1.departure_time THEN ts2.arrival_time-ts1.departure_time "
-		"       ELSE ts2.arrival_time + interval '24 hour' - ts1.departure_time END ASC, "
-		"  ts1.departure_time ASC";
+		"       ELSE ts2.arrival_time + interval '24 hour' - ts1.departure_time END ASC";
 
 	std::string from_station_id_s = std::to_string(from_station_id_filter);
 	std::string to_station_id_s = std::to_string(to_station_id_filter);
@@ -252,8 +251,7 @@ int main() {
 		direct_groups[idx].seat_map[seat.seat_type] = seat;
 	}
 
-	const size_t max_groups = 20;
-	for (size_t gi = 0; gi < direct_groups.size() && gi < max_groups; ++gi) {
+	for (size_t gi = 0; gi < direct_groups.size(); ++gi) {
 		DirectGroup &g = direct_groups[gi];
 		for (size_t si = 0; si < seat_order.size(); ++si) {
 			DirectSeatRow seat;
@@ -293,39 +291,47 @@ int main() {
 	PQclear(direct);
 
 	const char *transfer_sql =
-		"SELECT tp1.train_id, tp1.from_station::text, s1.station_name, tp1.to_station::text, sx1.station_name, cx1.city_name, "
-		"       tp2.train_id, tp2.from_station::text, sx2.station_name, tp2.to_station::text, s2.station_name, "
-		"       tp1.seat_type, "
-		"       ts1.departure_time::text, tsx1.arrival_time::text, tsx2.departure_time::text, ts2.arrival_time::text, "
-		"       (tp1.price + tp2.price)::text AS total_price, "
-		"       LEAST("
-		"         COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp1.train_id AND si.travel_date=$3::date AND si.seat_type=tp1.seat_type AND si.from_station=tp1.from_station AND si.to_station=tp1.to_station),5),"
-		"         COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp2.train_id AND si.travel_date=$3::date AND si.seat_type=tp2.seat_type AND si.from_station=tp2.from_station AND si.to_station=tp2.to_station),5)"
-		"       )::text AS left_total "
-		"FROM ticket_price tp1 "
-		"JOIN ticket_price tp2 ON tp1.seat_type=tp2.seat_type AND tp1.train_id<>tp2.train_id "
-		"JOIN station s1 ON s1.station_id=tp1.from_station "
-		"JOIN city c1 ON c1.city_id=s1.city_id "
-		"JOIN station sx1 ON sx1.station_id=tp1.to_station "
-		"JOIN city cx1 ON cx1.city_id=sx1.city_id "
-		"JOIN station sx2 ON sx2.station_id=tp2.from_station "
-		"JOIN city cx2 ON cx2.city_id=sx2.city_id "
-		"JOIN station s2 ON s2.station_id=tp2.to_station "
-		"JOIN city c2 ON c2.city_id=s2.city_id "
-		"JOIN train_station ts1 ON ts1.train_id=tp1.train_id AND ts1.station_id=tp1.from_station "
-		"JOIN train_station tsx1 ON tsx1.train_id=tp1.train_id AND tsx1.station_id=tp1.to_station "
-		"JOIN train_station tsx2 ON tsx2.train_id=tp2.train_id AND tsx2.station_id=tp2.from_station "
-		"JOIN train_station ts2 ON ts2.train_id=tp2.train_id AND ts2.station_id=tp2.to_station "
-		"WHERE c1.city_name=$1 AND c2.city_name=$2 AND c1.city_name<>c2.city_name "
-		"  AND cx1.city_name=cx2.city_name "
-		"  AND ts1.departure_time >= $4::time "
-		"  AND ($5::int=0 OR tp1.from_station=$5::int) "
-		"  AND ($6::int=0 OR tp2.to_station=$6::int) "
-		"  AND ("
-		"    (tp1.to_station=tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '1 hour' AND interval '4 hour') OR "
-		"    (tp1.to_station<>tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '2 hour' AND interval '4 hour')"
-		"  ) "
-		"ORDER BY (tp1.price + tp2.price) ASC, ts1.departure_time ASC";
+		"WITH transfer_candidates AS ("
+		"  SELECT tp1.train_id, tp1.from_station::text, s1.station_name, tp1.to_station::text, sx1.station_name, cx1.city_name, "
+		"         tp2.train_id, tp2.from_station::text, sx2.station_name, tp2.to_station::text, s2.station_name, "
+		"         tp1.seat_type, "
+		"         ts1.departure_time::text, tsx1.arrival_time::text, tsx2.departure_time::text, ts2.arrival_time::text, "
+		"         (tp1.price + tp2.price)::text AS total_price, "
+		"         LEAST("
+		"           COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp1.train_id AND si.travel_date=$3::date AND si.seat_type=tp1.seat_type AND si.from_station=tp1.from_station AND si.to_station=tp1.to_station),5),"
+		"           COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp2.train_id AND si.travel_date=$3::date AND si.seat_type=tp2.seat_type AND si.from_station=tp2.from_station AND si.to_station=tp2.to_station),5)"
+		"         )::text AS left_total, "
+		"         ts1.departure_time AS departure_time_val, "
+		"         ROW_NUMBER() OVER (PARTITION BY tp1.train_id, tp2.train_id, tp1.seat_type "
+		"                            ORDER BY (tp1.price + tp2.price) ASC) AS price_rank "
+		"  FROM ticket_price tp1 "
+		"  JOIN ticket_price tp2 ON tp1.seat_type=tp2.seat_type AND tp1.train_id<>tp2.train_id "
+		"  JOIN station s1 ON s1.station_id=tp1.from_station "
+		"  JOIN city c1 ON c1.city_id=s1.city_id "
+		"  JOIN station sx1 ON sx1.station_id=tp1.to_station "
+		"  JOIN city cx1 ON cx1.city_id=sx1.city_id "
+		"  JOIN station sx2 ON sx2.station_id=tp2.from_station "
+		"  JOIN city cx2 ON cx2.city_id=sx2.city_id "
+		"  JOIN station s2 ON s2.station_id=tp2.to_station "
+		"  JOIN city c2 ON c2.city_id=s2.city_id "
+		"  JOIN train_station ts1 ON ts1.train_id=tp1.train_id AND ts1.station_id=tp1.from_station "
+		"  JOIN train_station tsx1 ON tsx1.train_id=tp1.train_id AND tsx1.station_id=tp1.to_station "
+		"  JOIN train_station tsx2 ON tsx2.train_id=tp2.train_id AND tsx2.station_id=tp2.from_station "
+		"  JOIN train_station ts2 ON ts2.train_id=tp2.train_id AND ts2.station_id=tp2.to_station "
+		"  WHERE c1.city_name=$1 AND c2.city_name=$2 AND c1.city_name<>c2.city_name "
+		"    AND c1.city_name<>cx1.city_name "
+		"    AND cx2.city_name<>c2.city_name "
+		"    AND cx1.city_name=cx2.city_name "
+		"    AND ts1.departure_time >= $4::time "
+		"    AND ($5::int=0 OR tp1.from_station=$5::int) "
+		"    AND ($6::int=0 OR tp2.to_station=$6::int) "
+		"    AND ("
+		"      (tp1.to_station=tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '1 hour' AND interval '4 hour') OR "
+		"      (tp1.to_station<>tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '2 hour' AND interval '4 hour')"
+		"    ) "
+		") "
+		"SELECT * FROM transfer_candidates WHERE price_rank = 1 "
+		"ORDER BY departure_time_val ASC";
 
 	PGresult *transfer = PQexecParams(conn, transfer_sql, 6, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(transfer) != PGRES_TUPLES_OK) {
@@ -388,7 +394,7 @@ int main() {
 		transfer_groups[idx].seat_map[seat.seat_type] = seat;
 	}
 
-	for (size_t gi = 0; gi < transfer_groups.size() && gi < max_groups; ++gi) {
+	for (size_t gi = 0; gi < transfer_groups.size(); ++gi) {
 		TransferGroup &g = transfer_groups[gi];
 		std::string leg1 = g.train1 + " " + g.from1_name + "->" + g.to1_name;
 		std::string leg2 = g.train2 + " " + g.from2_name + "->" + g.to2_name;

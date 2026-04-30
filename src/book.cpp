@@ -331,19 +331,28 @@ int main() {
 
 	if (confirm != "1") {
 		std::cout << "<div class=\"book-card\"><div class=\"book-summary\">";
-			std::cout << "<div class=\"book-row\">"
-					  << "<div class=\"book-pair\"><span class=\"label\">Transfer Booking</span><b>2 legs</b></div>"
-					  << "<div class=\"book-pair\"><span class=\"label\">Leg 1</span><b>" << m12306::html_escape(train1) << "</b><span class=\"muted\">"
-					  << m12306::html_escape(from_name1) << " -> " << m12306::html_escape(to_name1)
-					  << "</span><span class=\"label\">Fare</span><b>" << fare1 << "</b></div>"
-					  << "<div class=\"book-pair\"><span class=\"label\">Leg 2</span><b>" << m12306::html_escape(train2) << "</b><span class=\"muted\">"
-					  << m12306::html_escape(from_name2) << " -> " << m12306::html_escape(to_name2)
-					  << "</span><span class=\"label\">Fare</span><b>" << fare2 << "</b></div>"
-					  << "<div class=\"book-pair\"><span class=\"label\">Date</span><b>" << m12306::html_escape(date)
-					  << "</b><span class=\"label\">Seat</span><b>" << m12306::html_escape(seat_type)
-					  << "</b><span class=\"label\">Fee</span><b>" << service_fee
-					  << "</b><span class=\"label\">Total</span><b>" << total << "</b></div>"
-					  << "</div>";
+		std::cout << "<div class=\"book-row book-row-head\">"
+				  << "<div class=\"book-pair\"><span class=\"label\">Transfer Booking</span><b>2 legs</b></div>"
+				  << "</div>";
+		std::cout << "<div class=\"book-row\">"
+				  << "<div class=\"book-pair\"><span class=\"label\">Leg 1</span><b>" << m12306::html_escape(train1) << "</b><span class=\"muted\">"
+				  << m12306::html_escape(from_name1) << " -> " << m12306::html_escape(to_name1)
+				  << "</span></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Fare</span><b>" << fare1 << "</b></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Leg 2</span><b>" << m12306::html_escape(train2) << "</b><span class=\"muted\">"
+				  << m12306::html_escape(from_name2) << " -> " << m12306::html_escape(to_name2)
+				  << "</span></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Fare</span><b>" << fare2 << "</b></div>"
+				  << "</div>";
+		std::cout << "<div class=\"book-row\">"
+				  << "<div class=\"book-pair\"><span class=\"label\">Date</span><b>" << m12306::html_escape(date)
+				  << "</b></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Seat</span><b>" << m12306::html_escape(seat_type)
+				  << "</b></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Fee</span><b>" << service_fee
+				  << "</b></div>"
+				  << "<div class=\"book-pair\"><span class=\"label\">Total</span><b>" << total << "</b></div>"
+				  << "</div>";
 		std::cout << "</div><p><a class=\"action-link\" href=\"/cgi-bin/book.cgi?username=" << m12306::html_escape(username)
 				  << "&transfer=1"
 				  << "&train1=" << m12306::html_escape(train1)
