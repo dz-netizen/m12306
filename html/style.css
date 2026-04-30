@@ -374,13 +374,13 @@ tbody tr:last-child td { border-bottom: none; }
 .book-pair {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  gap: 3px;
+  padding: 9px 11px;
   background: #fff;
   border: 1px solid #e7ddfb;
   border-radius: 10px;
-  min-width: 140px;
-  flex: 1 1 180px;
+  min-width: 128px;
+  flex: 1 1 160px;
 }
 .book-row .label {
   color: #5e4a8a;
@@ -404,6 +404,10 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 
+.book-card .book-row + .book-row {
+  margin-top: 2px;
+}
+
 .book-route {
   padding: 12px 14px;
   background: #fff;
@@ -415,14 +419,14 @@ tbody tr:last-child td { border-bottom: none; }
 
 .trip-times {
   display: grid;
-  gap: 6px;
-  line-height: 1.4;
+  gap: 4px;
+  line-height: 1.35;
 }
 .trip-times div {
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
+  white-space: normal;
 }
 .trip-label {
   color: #5e4a8a;
@@ -546,6 +550,7 @@ table a:hover {
   margin-top: 0;
   align-self: flex-end;
   padding: 10px 18px;
+  margin-left: auto;
 }
 
 .filter-form button[type="submit"] {
