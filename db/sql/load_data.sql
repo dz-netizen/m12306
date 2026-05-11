@@ -7,15 +7,15 @@
 
 BEGIN;
 
-\copy City(city_id, city_name) FROM 'db/data/processed/city.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
+\copy City(city_id, city_name) FROM '/home/dbms/Lab2/db/data/preprocess/output/city.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
 
-\copy Station(station_id, station_name, city_id) FROM 'db/data/processed/station.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
+\copy Station(station_id, station_name, city_id) FROM '/home/dbms/Lab2/db/data/preprocess/output/station.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
 
-\copy Train(train_id) FROM 'db/data/processed/train.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
+\copy Train(train_id) FROM '/home/dbms/Lab2/db/data/preprocess/output/train.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
 
-\copy Train_Station(train_id, station_id, station_order, arrival_time, departure_time) FROM 'db/data/processed/train_station.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true, NULL '');
+\copy Train_Station(train_id, station_id, station_order, arrival_time, departure_time) FROM '/home/dbms/Lab2/db/data/preprocess/output/train_station.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true, NULL '');
 
-\copy Ticket_Price(train_id, from_station, to_station, seat_type, price) FROM 'db/data/processed/ticket_price.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
+\copy Ticket_Price(train_id, from_station, to_station, seat_type, price) FROM '/home/dbms/Lab2/db/data/preprocess/output/ticket_price.tbl' WITH (FORMAT csv, DELIMITER '|', HEADER true);
 
 -- Keep SERIAL sequences in sync after explicit id import.
 SELECT setval('city_city_id_seq', COALESCE((SELECT MAX(city_id) FROM City), 1), true);

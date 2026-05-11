@@ -41,6 +41,7 @@ int main() {
 
 	if (action == "cancel" && !order_id.empty()) {
 		m12306::exec_ok(conn, "BEGIN");
+		// 锁定订单行，确认这笔订单属于当前用户且仍然是正常状态。
 		const char *lock_sql = "SELECT status FROM orders WHERE order_id=$1::int AND user_id=$2::int FOR UPDATE";
 		const char *lp[2] = {order_id.c_str(), uid_s.c_str()};
 		PGresult *lk = PQexecParams(conn, lock_sql, 2, NULL, lp, NULL, NULL, 0);
@@ -48,6 +49,7 @@ int main() {
 						&& std::string(PQgetvalue(lk, 0, 0)) == "正常");
 		PQclear(lk);
 		if (can_cancel) {
+			// 取出订单明细，逐段把库存回滚。
 			const char *item_sql = "SELECT train_id, seat_type, from_station, to_station, travel_date::text FROM order_item WHERE order_id=$1::int";
 			const char *ip[1] = {order_id.c_str()};
 			PGresult *it = PQexecParams(conn, item_sql, 1, NULL, ip, NULL, NULL, 0);
@@ -84,44 +86,83 @@ int main() {
 			  << "<label>结束日期 <input type=\"date\" name=\"date_to\" value=\"" << m12306::html_escape(date_to) << "\"></label>"
 			  << "<button type=\"submit\">筛选</button></form>";
 
-	const char *list_sql =
-		"SELECT o.order_id::text, o.create_time::date::text, "
-		"       COALESCE(train_info.train_ids,'-') AS train_ids, "
-		"       COALESCE(seat_info.seat_types,'-') AS seat_types, "
-		"       COALESCE(sf.station_name,'-') AS from_station, "
-		"       COALESCE(st.station_name,'-') AS to_station, "
-		"       COALESCE(tsf.departure_time::text,'-') AS depart_time, "
-		"       COALESCE(tst.arrival_time::text,'-') AS arrive_time, "
-		"       o.total_price::text, o.status "
-		"FROM orders o "
-		"LEFT JOIN LATERAL ("
-		"  SELECT string_agg(oi.train_id, '->' ORDER BY oi.id) AS train_ids "
-		"  FROM order_item oi WHERE oi.order_id=o.order_id"
-		") train_info ON TRUE "
-		"LEFT JOIN LATERAL ("
-		"  SELECT string_agg(oi.seat_type, '->' ORDER BY oi.id) AS seat_types "
-		"  FROM order_item oi WHERE oi.order_id=o.order_id"
-		") seat_info ON TRUE "
-		"LEFT JOIN LATERAL ("
-		"  SELECT oi.from_station FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id ASC LIMIT 1"
-		") first_leg ON TRUE "
-		"LEFT JOIN LATERAL ("
-		"  SELECT oi.to_station FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id DESC LIMIT 1"
-		") last_leg ON TRUE "
-		"LEFT JOIN LATERAL ("
-		"  SELECT oi.train_id, oi.from_station "
-		"  FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id ASC LIMIT 1"
-		") first_seg ON TRUE "
-		"LEFT JOIN LATERAL ("
-		"  SELECT oi.train_id, oi.to_station "
-		"  FROM order_item oi WHERE oi.order_id=o.order_id ORDER BY oi.id DESC LIMIT 1"
-		") last_seg ON TRUE "
-		"LEFT JOIN station sf ON sf.station_id=first_leg.from_station "
-		"LEFT JOIN station st ON st.station_id=last_leg.to_station "
-		"LEFT JOIN train_station tsf ON tsf.train_id=first_seg.train_id AND tsf.station_id=first_seg.from_station "
-		"LEFT JOIN train_station tst ON tst.train_id=last_seg.train_id AND tst.station_id=last_seg.to_station "
-		"WHERE o.user_id=$1::int AND o.create_time::date BETWEEN $2::date AND $3::date "
-		"ORDER BY o.order_id DESC";
+	// 列出用户订单，并把首末程、列车号、起止站和时间拼成一行摘要。
+const char *list_sql =
+    // =========================
+    // 主查询：订单基础信息
+    // =========================
+    "SELECT o.order_id::text, o.create_time::date::text, "
+    "       COALESCE(train_info.train_ids,'-') AS train_ids, "   // 拼接整单经过的车次链
+    "       COALESCE(seat_info.seat_types,'-') AS seat_types, "   // 拼接整单席别链
+    "       COALESCE(sf.station_name,'-') AS from_station, "      // 起点站名称
+    "       COALESCE(st.station_name,'-') AS to_station, "        // 终点站名称
+    "       COALESCE(tsf.departure_time::text,'-') AS depart_time, " // 首段出发时间
+    "       COALESCE(tst.arrival_time::text,'-') AS arrive_time, "   // 末段到达时间
+    "       o.total_price::text, o.status "
+
+    "FROM orders o "
+
+    // 聚合订单内所有车次（用于展示路径）
+    "LEFT JOIN LATERAL ("
+    "  SELECT string_agg(oi.train_id, '->' ORDER BY oi.id) AS train_ids "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id"
+    ") train_info ON TRUE "
+
+    //聚合席别信息（与车次一一对应）
+    "LEFT JOIN LATERAL ("
+    "  SELECT string_agg(oi.seat_type, '->' ORDER BY oi.id) AS seat_types "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id"
+    ") seat_info ON TRUE "
+
+
+    // 找订单第一段的起点站（用于展示 from_statio
+    "LEFT JOIN LATERAL ("
+    "  SELECT oi.from_station "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id "
+    "  ORDER BY oi.id ASC LIMIT 1"
+    ") first_leg ON TRUE "
+
+    // 找订单最后一段的终点站（用于展示 to_station）
+
+    "LEFT JOIN LATERAL ("
+    "  SELECT oi.to_station "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id "
+    "  ORDER BY oi.id DESC LIMIT 1"
+    ") last_leg ON TRUE "
+
+
+    // 首段车次 + 起点站（用于查 departure_time）
+    "LEFT JOIN LATERAL ("
+    "  SELECT oi.train_id, oi.from_station "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id "
+    "  ORDER BY oi.id ASC LIMIT 1"
+    ") first_seg ON TRUE "
+
+    // 末段车次 + 终点站（用于查 arrival_time）
+    "LEFT JOIN LATERAL ("
+    "  SELECT oi.train_id, oi.to_station "
+    "  FROM order_item oi WHERE oi.order_id=o.order_id "
+    "  ORDER BY oi.id DESC LIMIT 1"
+    ") last_seg ON TRUE "
+
+    // 站点维表：把 station_id -> station_name
+    "LEFT JOIN station sf ON sf.station_id=first_leg.from_station "
+    "LEFT JOIN station st ON st.station_id=last_leg.to_station "
+
+    // 8. 车站时刻表：拿首段出发时间 & 末段到达时间
+    "LEFT JOIN train_station tsf "
+    "  ON tsf.train_id=first_seg.train_id "
+    " AND tsf.station_id=first_seg.from_station "
+
+    "LEFT JOIN train_station tst "
+    "  ON tst.train_id=last_seg.train_id "
+    " AND tst.station_id=last_seg.to_station "
+
+    // 过滤条件：用户 + 时间范围
+    "WHERE o.user_id=$1::int "
+    "  AND o.create_time::date BETWEEN $2::date AND $3::date "
+    // 最近订单优先
+    "ORDER BY o.order_id DESC";
 	const char *lp2[3] = {uid_s.c_str(), date_from.c_str(), date_to.c_str()};
 	PGresult *ls = PQexecParams(conn, list_sql, 3, NULL, lp2, NULL, NULL, 0);
 	if (PQresultStatus(ls) != PGRES_TUPLES_OK) {
@@ -164,7 +205,11 @@ int main() {
 	std::cout << "</table>";
 
 	if (action == "detail" && !order_id.empty()) {
+		// 订单详情页需要把每一段的站点、时间和价格展开显示。
 		const char *detail_sql =
+		// =========================
+		// 主查询：订单明细的基础信息
+		// =========================
 			"SELECT oi.id::text, oi.train_id, sf.station_name, st.station_name, "
 			"       oi.seat_type, oi.price::text, oi.travel_date::text, "
 			"       COALESCE(ts1.departure_time::text,'-') AS depart_time, "
@@ -173,10 +218,11 @@ int main() {
 			"JOIN orders o ON o.order_id=oi.order_id "
 			"JOIN station sf ON sf.station_id=oi.from_station "
 			"JOIN station st ON st.station_id=oi.to_station "
-			"LEFT JOIN train_station ts1 ON ts1.train_id=oi.train_id AND ts1.station_id=oi.from_station "
-			"LEFT JOIN train_station ts2 ON ts2.train_id=oi.train_id AND ts2.station_id=oi.to_station "
+			"LEFT JOIN train_station ts1 ON ts1.train_id=oi.train_id AND ts1.station_id=oi.from_station "//找到每段的出发时间
+			"LEFT JOIN train_station ts2 ON ts2.train_id=oi.train_id AND ts2.station_id=oi.to_station "//找到每段的到达时间
 			"WHERE oi.order_id=$1::int AND o.user_id=$2::int "
 			"ORDER BY oi.id";
+			
 		const char *dp[2] = {order_id.c_str(), uid_s.c_str()};
 		PGresult *dr = PQexecParams(conn, detail_sql, 2, NULL, dp, NULL, NULL, 0);
 		if (PQresultStatus(dr) == PGRES_TUPLES_OK && PQntuples(dr) > 0) {

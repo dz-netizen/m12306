@@ -36,6 +36,7 @@ int main() {
 	}
 
 	m12306::ensure_inventory(conn, train_id, date);
+	// 先找出这趟车支持的席别，后面按席别分别展示余票和票价。
 	const char *seat_sql =
 		"SELECT seat_type FROM ("
 		"  SELECT DISTINCT seat_type "
@@ -70,30 +71,68 @@ int main() {
 		return 0;
 	}
 
-	const char *sql =
-		"WITH start_station AS ("
-		"  SELECT station_id AS start_sid FROM train_station WHERE train_id=$1 ORDER BY station_order LIMIT 1"
-		") "
-		"SELECT ts.station_order, c.city_name, s.station_name, "
-		"       COALESCE(ts.arrival_time::text,'-') AS arr, COALESCE(ts.departure_time::text,'-') AS dep, "
-		"       COALESCE(tp.price::text,'-') AS fare, "
-		"       CASE WHEN ts.station_order=1 THEN 0 ELSE COALESCE(("
-		"         SELECT MIN(si.remaining) "
-		"         FROM seat_inventory si "
-		"         JOIN train_station a ON a.train_id=si.train_id AND a.station_id=si.from_station "
-		"         JOIN train_station b ON b.train_id=si.train_id AND b.station_id=si.to_station "
-		"         WHERE si.train_id=$1 AND si.travel_date=$2::date AND si.seat_type=$3 "
-		"           AND a.station_order>=1 AND b.station_order=ts.station_order"
-		"       ), 5) END AS left_seat, "
-		"       ts.station_id "
-		"FROM train_station ts "
-		"JOIN station s ON s.station_id=ts.station_id "
-		"JOIN city c ON c.city_id=s.city_id "
-		"LEFT JOIN start_station ss ON TRUE "
-		"LEFT JOIN ticket_price tp ON tp.train_id=ts.train_id AND tp.from_station=ss.start_sid "
-		"  AND tp.to_station=ts.station_id AND tp.seat_type=$3 "
-		"WHERE ts.train_id=$1 "
-		"ORDER BY ts.station_order";
+	// 按站序展开整趟列车，并补出每一站的票价与该席别余票。
+const char *sql =
+	"WITH start_station AS ("
+	// -- 起始站：用于计算全程票价（固定起点）
+	"  SELECT station_id AS start_sid "
+	"  FROM train_station "
+	"  WHERE train_id = $1 "
+	"  ORDER BY station_order "
+	"  LIMIT 1"
+	") "
+
+	"SELECT "
+	"  ts.station_order, "
+	"  c.city_name, "
+	"  s.station_name, "
+	"  COALESCE(ts.arrival_time::text, '-') AS arr, "
+	"  COALESCE(ts.departure_time::text, '-') AS dep, "
+	"  COALESCE(tp.price::text, '-') AS fare, "
+	"  CASE "
+	"    WHEN ts.station_order = 1 THEN 0 "
+	"    ELSE COALESCE( ("
+	"      SELECT MIN(si.remaining) "
+	"      FROM seat_inventory si "
+
+	// "      -- 将库存区间映射到站序区间"
+	"      JOIN train_station ts_from "
+	"        ON ts_from.train_id = si.train_id "
+	"       AND ts_from.station_id = si.from_station "
+
+	"      JOIN train_station ts_to "
+	"        ON ts_to.train_id = si.train_id "
+	"       AND ts_to.station_id = si.to_station "
+
+	"      WHERE si.train_id = $1 "
+	"        AND si.travel_date = $2::date "
+	"        AND si.seat_type = $3 "
+
+	// "        -- 从起点开始覆盖到当前站"
+	"        AND ts_from.station_order >= 1 "
+	"        AND ts_to.station_order = ts.station_order"
+	"    ), 5) "
+	"  END AS left_seat, "
+	"  ts.station_id "
+
+	"FROM train_station ts "
+
+	// "-- 站点信息"
+	"JOIN station s ON s.station_id = ts.station_id "
+	"JOIN city c ON c.city_id = s.city_id "
+
+	// "-- 固定起点（用于票价计算）"
+	"LEFT JOIN start_station ss ON TRUE "
+
+	// "-- 票价：起点 -> 当前站"
+	"LEFT JOIN ticket_price tp "
+	"  ON tp.train_id = ts.train_id "
+	" AND tp.from_station = ss.start_sid "
+	" AND tp.to_station = ts.station_id "
+	" AND tp.seat_type = $3 "
+
+	"WHERE ts.train_id = $1 "
+	"ORDER BY ts.station_order";
 
 	std::vector<std::string> station_sid;
 	std::vector<std::string> station_name;

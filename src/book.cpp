@@ -11,6 +11,7 @@ static bool fetch_leg(PGconn *conn,
 	double &fare,
 	std::string &from_name,
 	std::string &to_name) {
+	// 读取某一段车票的价格和起止站名，用于下单确认和订单明细。
 	const char *sql =
 		"SELECT tp.price::text, sf.station_name, st.station_name "
 		"FROM ticket_price tp "
@@ -36,13 +37,15 @@ static bool lock_and_check_inventory(PGconn *conn,
 	const std::string &seat_type,
 	const std::string &from_sid,
 	const std::string &to_sid) {
+	// 锁定这段区间会覆盖到的库存记录，确保下单前仍有余票。
 	const char *sql =
-		"WITH req AS ("
+		"WITH req AS ("//先找出这段区间对应的站序区间
 		"  SELECT rf.station_order AS req_from_order, rt.station_order AS req_to_order "
 		"  FROM train_station rf "
 		"  JOIN train_station rt ON rt.train_id=rf.train_id "
-		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int"
-		"), targets AS ("
+		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int)," 
+
+		"targets AS ("//再锁定所有与这段区间有重叠的库存记录
 		"  SELECT si.remaining "
 		"  FROM seat_inventory si "
 		"  JOIN train_station a ON a.train_id=si.train_id AND a.station_id=si.from_station "
@@ -54,7 +57,9 @@ static bool lock_and_check_inventory(PGconn *conn,
 		"    AND r.req_from_order < b.station_order "
 		"  FOR UPDATE"
 		") "
+		// 最后检查被锁定的记录中是否有余票，默认没有库存记录时视为有 5 张票。
 		"SELECT COALESCE(MIN(remaining),0)::text, COUNT(*)::text FROM targets";
+
 	const char *params[5] = {train_id.c_str(), date.c_str(), seat_type.c_str(), from_sid.c_str(), to_sid.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
 	bool ok = false;
@@ -73,22 +78,24 @@ static bool dec_inventory(PGconn *conn,
 	const std::string &seat_type,
 	const std::string &from_sid,
 	const std::string &to_sid) {
+	// 事务内把区间库存减一，与上面的锁定检查配套使用。
 	const char *sql =
-		"WITH req AS ("
+		"WITH req AS ("//先找出这段区间对应的站序区间
 		"  SELECT rf.station_order AS req_from_order, rt.station_order AS req_to_order "
 		"  FROM train_station rf "
 		"  JOIN train_station rt ON rt.train_id=rf.train_id "
-		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int"
-		") "
-		"UPDATE seat_inventory si "
-		"SET remaining=remaining-1 "
-		"FROM train_station a, train_station b, req r "
+		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int) "
+
+		"UPDATE seat_inventory si "		//再把所有与这段区间有重叠的库存记录减一
+		"SET remaining=remaining-1 "	
+		"FROM train_station ts_from, train_station ts_to, req r "
 		"WHERE si.train_id=$1 AND si.travel_date=$2::date AND si.seat_type=$3 "
-		"  AND a.train_id=si.train_id AND a.station_id=si.from_station "
-		"  AND b.train_id=si.train_id AND b.station_id=si.to_station "
+		"  AND ts_from.train_id=si.train_id AND ts_from.station_id=si.from_station "
+		"  AND ts_to.train_id=si.train_id AND ts_to.station_id=si.to_station "
 		"  AND r.req_from_order < r.req_to_order "
-		"  AND a.station_order < r.req_to_order "
-		"  AND r.req_from_order < b.station_order";
+		"  AND ts_from.station_order < r.req_to_order "
+		"  AND r.req_from_order < ts_to.station_order";
+
 	const char *params[5] = {train_id.c_str(), date.c_str(), seat_type.c_str(), from_sid.c_str(), to_sid.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
 	bool ok = false;
@@ -116,9 +123,10 @@ static bool has_time_conflict_with_existing(PGconn *conn,
 	const std::string &from_sid,
 	const std::string &to_sid,
 	const std::string &date) {
+	// 检查新订单时间是否与用户已有有效订单重叠，防止重复占用行程时间。
 	std::string uid_s = std::to_string(user_id);
 	const char *sql =
-		"WITH new_leg AS ("
+		"WITH new_leg AS ("//先把新订单的出发到达时间算出来
 		"  SELECT ($5::date + tsf.departure_time) AS dep_ts, "
 		"         ($5::date + tst.arrival_time "
 		"          + CASE WHEN tst.arrival_time <= tsf.departure_time THEN interval '1 day' ELSE interval '0 day' END) AS arr_ts "
@@ -126,6 +134,8 @@ static bool has_time_conflict_with_existing(PGconn *conn,
 		"  JOIN train_station tst ON tst.train_id=tsf.train_id "
 		"  WHERE tsf.train_id=$2 AND tsf.station_id=$3::int AND tst.station_id=$4::int"
 		") "
+		
+		//再找出用户已有订单的所有行程区间，检查是否有时间重叠
 		"SELECT EXISTS("
 		"  SELECT 1 "
 		"  FROM new_leg nl "
@@ -208,6 +218,7 @@ int main() {
 	if (!is_transfer) {
 		m12306::ensure_inventory(conn, train_id, date);
 
+		// 先把单段票价、出发站和到达站查出来，再进入确认页或正式下单。
 		double fare = 0.0;
 		std::string from_name, to_name;
 		if (!fetch_leg(conn, train_id, from_sid, to_sid, seat_type, fare, from_name, to_name)) {
@@ -316,6 +327,7 @@ int main() {
 	m12306::ensure_inventory(conn, train1, date);
 	m12306::ensure_inventory(conn, train2, date);
 
+	// 换乘单需要分别核对两段票价，之后再合并成总价。
 	double fare1 = 0.0, fare2 = 0.0;
 	std::string from_name1, to_name1, from_name2, to_name2;
 	if (!fetch_leg(conn, train1, from1, to1, seat_type, fare1, from_name1, to_name1) ||

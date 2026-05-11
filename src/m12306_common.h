@@ -102,6 +102,7 @@ inline int get_user_id(PGconn *conn, const std::string &username) {
 
 inline bool ensure_inventory(PGconn *conn, const std::string &train_id, const std::string &travel_date) {
     const char *sql =
+    // 事务内先插入库存记录（如果已存在则忽略），确保后续查询和更新时有记录可锁定。
         "INSERT INTO seat_inventory(train_id, travel_date, seat_type, from_station, to_station, remaining) "
         "SELECT tp.train_id, $2::date, tp.seat_type, tp.from_station, tp.to_station, 5 "
         "FROM ticket_price tp "

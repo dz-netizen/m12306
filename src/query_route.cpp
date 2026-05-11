@@ -58,11 +58,39 @@ static int parse_positive_int(const std::string &value, int fallback) {
 	return parsed;
 }
 
+static bool lookup_city_id(PGconn *conn,
+				   const std::string &city_name,
+				   int &city_id,
+				   std::string &error_message) {
+	// 先把城市名换成 city_id，后续站点和票价查询都能直接用整数过滤。
+	const char *city_sql =
+		"SELECT city_id "
+		"FROM city "
+		"WHERE city_name=$1 "
+		"LIMIT 1";
+	const char *params[1] = {city_name.c_str()};
+	PGresult *res = PQexecParams(conn, city_sql, 1, NULL, params, NULL, NULL, 0);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+		error_message = PQresultErrorMessage(res);
+		PQclear(res);
+		return false;
+	}
+	if (PQntuples(res) == 0) {
+		error_message = "Unknown city: " + city_name;
+		PQclear(res);
+		return false;
+	}
+	city_id = std::atoi(PQgetvalue(res, 0, 0));
+	PQclear(res);
+	return true;
+}
+
 static void render_transfer_panel(const std::vector<TransferGroup> &transfer_groups,
 							  const std::string &username,
 							  const std::string &date,
 							  int transfer_page,
 							  bool partial_response) {
+	// 中转结果单独分页，partial_response 只返回面板片段给前端异步替换。
 	const size_t page_size = 20;
 	std::vector<std::string> seat_order;
 	seat_order.push_back("商务座");
@@ -172,61 +200,228 @@ static void render_transfer_panel(const std::vector<TransferGroup> &transfer_gro
 	std::cout << "</div>";
 }
 
+// 中转候选在 SQL 里一次性算出，再在 C++ 里整理成可展示的分组结构。
 static bool load_transfer_groups(PGconn *conn,
-							 const std::string &from_city,
-							 const std::string &to_city,
+						 int from_city_id,
+						 int to_city_id,
 							 const std::string &date,
 							 const std::string &time,
 							 int from_station_id_filter,
 							 int to_station_id_filter,
 							 std::vector<TransferGroup> &transfer_groups,
 							 std::string &error_message) {
-	const char *transfer_sql =
-		"WITH transfer_candidates AS ("
-		"  SELECT tp1.train_id, tp1.from_station::text, s1.station_name, tp1.to_station::text, sx1.station_name, cx1.city_name, "
-		"         tp2.train_id, tp2.from_station::text, sx2.station_name, tp2.to_station::text, s2.station_name, "
-		"         tp1.seat_type, "
-		"         ts1.departure_time::text, tsx1.arrival_time::text, tsx2.departure_time::text, ts2.arrival_time::text, "
-		"         (tp1.price + tp2.price)::text AS total_price, "
-		"         LEAST("
-		"           COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp1.train_id AND si.travel_date=$3::date AND si.seat_type=tp1.seat_type AND si.from_station=tp1.from_station AND si.to_station=tp1.to_station),5),"
-		"           COALESCE((SELECT si.remaining FROM seat_inventory si WHERE si.train_id=tp2.train_id AND si.travel_date=$3::date AND si.seat_type=tp2.seat_type AND si.from_station=tp2.from_station AND si.to_station=tp2.to_station),5)"
-		"         )::text AS left_total, "
-		"         ts1.departure_time AS departure_time_val, "
-		"         ROW_NUMBER() OVER (PARTITION BY tp1.train_id, tp2.train_id, tp1.seat_type "
-		"                            ORDER BY (tp1.price + tp2.price) ASC) AS price_rank "
-		"  FROM ticket_price tp1 "
-		"  JOIN ticket_price tp2 ON tp1.seat_type=tp2.seat_type AND tp1.train_id<>tp2.train_id "
-		"  JOIN station s1 ON s1.station_id=tp1.from_station "
-		"  JOIN city c1 ON c1.city_id=s1.city_id "
-		"  JOIN station sx1 ON sx1.station_id=tp1.to_station "
-		"  JOIN city cx1 ON cx1.city_id=sx1.city_id "
-		"  JOIN station sx2 ON sx2.station_id=tp2.from_station "
-		"  JOIN city cx2 ON cx2.city_id=sx2.city_id "
-		"  JOIN station s2 ON s2.station_id=tp2.to_station "
-		"  JOIN city c2 ON c2.city_id=s2.city_id "
-		"  JOIN train_station ts1 ON ts1.train_id=tp1.train_id AND ts1.station_id=tp1.from_station "
-		"  JOIN train_station tsx1 ON tsx1.train_id=tp1.train_id AND tsx1.station_id=tp1.to_station "
-		"  JOIN train_station tsx2 ON tsx2.train_id=tp2.train_id AND tsx2.station_id=tp2.from_station "
-		"  JOIN train_station ts2 ON ts2.train_id=tp2.train_id AND ts2.station_id=tp2.to_station "
-		"  WHERE c1.city_name=$1 AND c2.city_name=$2 AND c1.city_name<>c2.city_name "
-		"    AND c1.city_name<>cx1.city_name "
-		"    AND cx2.city_name<>c2.city_name "
-		"    AND cx1.city_name=cx2.city_name "
-		"    AND ts1.departure_time >= $4::time "
-		"    AND ($5::int=0 OR tp1.from_station=$5::int) "
-		"    AND ($6::int=0 OR tp2.to_station=$6::int) "
-		"    AND ("
-		"      (tp1.to_station=tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '1 hour' AND interval '4 hour') OR "
-		"      (tp1.to_station<>tp2.from_station AND (tsx2.departure_time - tsx1.arrival_time) BETWEEN interval '2 hour' AND interval '4 hour')"
-		"    ) "
-		") "
-		"SELECT * FROM transfer_candidates WHERE price_rank = 1 "
-		"ORDER BY departure_time_val ASC";
+	// 按出发城市、到达城市和时间窗口筛选可用的中转组合。
+
+	  // 这段 SQL 先分别找出第一程和第二程，再按中转城市、席别和时间窗组合成候选换乘方案。
+  const char *transfer_sql =
+      /*
+       * first_leg:
+       * 先筛选第一程：出发城市 -> 换乘城市。
+       */
+      "WITH first_leg AS ("
+      "  SELECT "
+      "    tp.train_id, "
+      "    tp.from_station, "
+      "    tp.to_station, "
+      "    tp.seat_type, "
+      "    tp.price, "
+      "    from_station.station_name AS from_station_name, "
+      "    transfer_station.station_name AS transfer_station_name, "
+      "    transfer_city.city_name AS transfer_city_name, "
+      "    from_stop.departure_time, "
+      "    transfer_arrive_stop.arrival_time, "
+      "    from_stop.station_order AS from_order, "
+      "    transfer_arrive_stop.station_order AS to_order "
+
+      "  FROM ticket_price tp "
+
+	"  JOIN station from_station ON from_station.station_id=tp.from_station "//出发站ID关联车站表，拿到车站名称和所属城市ID
+      "  JOIN station transfer_station ON transfer_station.station_id=tp.to_station "
+      "  JOIN city transfer_city ON transfer_city.city_id=transfer_station.city_id "
+
+      "  JOIN train_station from_stop "//关联发车站的车次时刻表记录，拿到发车时间和站序
+      "    ON from_stop.train_id=tp.train_id "
+      "   AND from_stop.station_id=tp.from_station "
+
+      "  JOIN train_station transfer_arrive_stop "//关联换乘站的车次时刻表记录，拿到到达时间和站序
+      "    ON transfer_arrive_stop.train_id=tp.train_id "
+      "   AND transfer_arrive_stop.station_id=tp.to_station "
+
+		// 筛选条件：出发城市、换乘城市、时间窗口、可选的出发站 
+	"  WHERE from_station.city_id=$1::int "
+	"    AND transfer_station.city_id<>$1::int "
+	"    AND transfer_station.city_id<>$2::int "
+      "    AND from_stop.departure_time >= $4::time "
+      "    AND ($5::int=0 OR tp.from_station=$5::int) "
+      "    AND transfer_arrive_stop.station_order > from_stop.station_order"
+      "), "
+
+      /*
+       * second_leg:
+       * 再筛选第二程：换乘城市 -> 到达城市。
+       */
+      "second_leg AS ("
+      "  SELECT "
+      "    tp.train_id, "
+      "    tp.from_station, "
+      "    tp.to_station, "
+      "    tp.seat_type, "
+      "    tp.price, "
+      "    transfer_station.station_name AS transfer_station_name, "
+      "    to_station.station_name AS to_station_name, "
+      "    transfer_city.city_name AS transfer_city_name, "
+      "    transfer_depart_stop.departure_time, "
+      "    to_stop.arrival_time, "
+      "    transfer_depart_stop.station_order AS from_order, "
+      "    to_stop.station_order AS to_order "
+
+      "  FROM ticket_price tp "
+
+	"  JOIN station transfer_station ON transfer_station.station_id=tp.from_station "//换乘站ID关联车站表，拿到车站名称和所属城市ID
+	"  JOIN city transfer_city ON transfer_city.city_id=transfer_station.city_id "
+	"  JOIN station to_station ON to_station.station_id=tp.to_station "
+
+      "  JOIN train_station transfer_depart_stop "//关联换乘站的车次时刻表记录，拿到发车时间和站序
+      "    ON transfer_depart_stop.train_id=tp.train_id "
+      "   AND transfer_depart_stop.station_id=tp.from_station "
+
+      "  JOIN train_station to_stop "//关联到达站的车次时刻表记录，拿到到达时间和站序
+      "    ON to_stop.train_id=tp.train_id "
+      "   AND to_stop.station_id=tp.to_station "
+
+	// 筛选条件：到达城市、换乘城市、可选的到达站、换乘站必须在第一程的到达站之后
+	"  WHERE to_station.city_id=$2::int "
+	"    AND transfer_station.city_id<>$1::int "
+	"    AND transfer_station.city_id<>$2::int "
+      "    AND ($6::int=0 OR tp.to_station=$6::int) "
+      "    AND to_stop.station_order > transfer_depart_stop.station_order"
+      "), "
+
+      /*
+       * transfer_candidates:
+       * 组合第一程和第二程。
+       * 要求：
+       * 1. 两程席别一致
+       * 2. 两程不是同一车次
+       * 3. 换乘城市一致
+       * 4. 同站换乘至少 1 小时，不同站换乘至少 2 小时
+       * 5. 最长换乘时间不超过 4 小时
+       */
+      "transfer_candidates AS ("
+      "  SELECT "
+      "    first_leg.*, "
+      "    second_leg.train_id AS second_train_id, "
+      "    second_leg.from_station AS second_from_station, "
+      "    second_leg.transfer_station_name AS second_from_station_name, "
+      "    second_leg.to_station AS second_to_station, "
+      "    second_leg.to_station_name, "
+      "    second_leg.departure_time AS second_departure_time, "
+      "    second_leg.arrival_time AS second_arrival_time, "
+      "    second_leg.price AS second_price, "
+      "    (first_leg.price + second_leg.price) AS total_price, "
+      "    CASE "
+      "      WHEN second_leg.departure_time >= first_leg.arrival_time "
+      "      THEN second_leg.departure_time - first_leg.arrival_time "
+      "      ELSE second_leg.departure_time + interval '24 hour' - first_leg.arrival_time "
+      "    END AS transfer_duration "
+
+      "  FROM first_leg "
+
+      "  JOIN second_leg "//关联第二程，拿到第二程的车次、站点、时间和价格
+      "    ON second_leg.seat_type=first_leg.seat_type "
+      "   AND second_leg.train_id<>first_leg.train_id "
+      "   AND second_leg.transfer_city_name=first_leg.transfer_city_name "
+      "), "
+
+      /*
+       * available_candidates:
+       * 关联两段库存。
+       * 没有库存记录时，默认余票为 5。
+       */
+      "available_candidates AS ("
+      "  SELECT "
+      "    candidate.*, "
+      "    LEAST("
+      "      COALESCE(first_inventory.remaining, 5), "
+      "      COALESCE(second_inventory.remaining, 5)"
+      "    ) AS left_total "
+
+      "  FROM transfer_candidates candidate "
+
+		// 关联第一程库存记录，拿到第一程的余票
+      "  LEFT JOIN seat_inventory first_inventory "
+      "    ON first_inventory.train_id=candidate.train_id "
+      "   AND first_inventory.travel_date=$3::date "
+      "   AND first_inventory.seat_type=candidate.seat_type "
+      "   AND first_inventory.from_station=candidate.from_station "
+      "   AND first_inventory.to_station=candidate.to_station "
+
+	  // 关联第二程库存记录，拿到第二程的余票
+      "  LEFT JOIN seat_inventory second_inventory "
+      "    ON second_inventory.train_id=candidate.second_train_id "
+      "   AND second_inventory.travel_date=$3::date "
+      "   AND second_inventory.seat_type=candidate.seat_type "
+      "   AND second_inventory.from_station=candidate.second_from_station "
+      "   AND second_inventory.to_station=candidate.second_to_station "
+
+	  // 筛选条件：满足换乘时间要求，并且两段的最小余票数大于 0。
+      "  WHERE candidate.transfer_duration BETWEEN interval '1 hour' AND interval '4 hour' "
+      "    AND ("
+      "      candidate.to_station=candidate.second_from_station "
+      "      OR candidate.transfer_duration >= interval '2 hour'"
+      "    ) "
+      "    AND LEAST("
+      "      COALESCE(first_inventory.remaining, 5), "
+      "      COALESCE(second_inventory.remaining, 5)"
+      "    ) > 0"
+      "), "
+
+      /*
+       * ranked_candidates:
+       * 同一组 车次1 + 车次2 + 席别 只保留总价最低的方案。
+       */
+      "ranked_candidates AS ("
+      "  SELECT "
+      "    available_candidates.*, "
+      "    ROW_NUMBER() OVER ("
+      "      PARTITION BY train_id, second_train_id, seat_type "
+      "      ORDER BY total_price ASC"
+      "    ) AS price_rank "
+      "  FROM available_candidates"
+      ") "
+
+      "SELECT "
+      "  train_id, "
+      "  from_station::text, "
+      "  from_station_name, "
+      "  to_station::text, "
+      "  transfer_station_name, "
+      "  transfer_city_name, "
+      "  second_train_id, "
+      "  second_from_station::text, "
+      "  second_from_station_name, "
+      "  second_to_station::text, "
+      "  to_station_name, "
+      "  seat_type, "
+      "  departure_time::text, "
+      "  arrival_time::text, "
+      "  second_departure_time::text, "
+      "  second_arrival_time::text, "
+      "  total_price::text, "
+      "  left_total::text, "
+      "  departure_time AS departure_time_val, "
+      "  price_rank "
+
+      "FROM ranked_candidates "
+      "WHERE price_rank=1 "
+      "ORDER BY departure_time_val ASC";
+
 
 	std::string from_station_id_s = std::to_string(from_station_id_filter);
 	std::string to_station_id_s = std::to_string(to_station_id_filter);
-	const char *params[6] = {from_city.c_str(), to_city.c_str(), date.c_str(), time.c_str(), from_station_id_s.c_str(), to_station_id_s.c_str()};
+	std::string from_city_id_s = std::to_string(from_city_id);
+	std::string to_city_id_s = std::to_string(to_city_id);
+	const char *params[6] = {from_city_id_s.c_str(), to_city_id_s.c_str(), date.c_str(), time.c_str(), from_station_id_s.c_str(), to_station_id_s.c_str()};
 	PGresult *transfer = PQexecParams(conn, transfer_sql, 6, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(transfer) != PGRES_TUPLES_OK) {
 		error_message = PQresultErrorMessage(transfer);
@@ -305,6 +500,7 @@ int main() {
 		std::cout << "Content-type:text/html\n\n";
 	}
 
+	// 城市参数缺失或日期非法时，直接返回错误页或错误片段。
 	if (from_city.empty() || to_city.empty()) {
 		if (!partial_response) m12306::print_page_begin("查询线路");
 		std::cout << "<p class=\"err\">from_city and to_city are required.</p>";
@@ -318,6 +514,7 @@ int main() {
 		return 0;
 	}
 
+	// 先渲染直达结果，再渲染中转结果，保持页面结构清晰。
 	PGconn *conn = m12306::connect_db();
 	if (PQstatus(conn) != CONNECTION_OK) {
 		if (!partial_response) m12306::print_page_begin("查询线路");
@@ -328,14 +525,31 @@ int main() {
 		return 1;
 	}
 
+	int from_city_id = 0;
+	int to_city_id = 0;
+	std::string city_error;
+	if (!lookup_city_id(conn, from_city, from_city_id, city_error) || !lookup_city_id(conn, to_city, to_city_id, city_error)) {
+		if (!partial_response) m12306::print_page_begin("查询线路");
+		std::cout << "<p class=\"err\">" << m12306::html_escape(city_error) << "</p>";
+		PQfinish(conn);
+		m12306::print_page_end();
+		return 0;
+	}
+
+	// 加载并渲染直达车次结果。
 	const char *city_station_sql =
 		"SELECT s.station_name "
-		"FROM station s JOIN city c ON c.city_id=s.city_id "
-		"WHERE c.city_name=$1 "
+		"FROM station s "
+		"WHERE s.city_id=$1::int "
 		"ORDER BY s.station_name";
-	const char *from_city_param[1] = {from_city.c_str()};
-	const char *to_city_param[1] = {to_city.c_str()};
+
+	std::string from_city_id_s = std::to_string(from_city_id);
+	std::string to_city_id_s = std::to_string(to_city_id);
+	const char *from_city_param[1] = {from_city_id_s.c_str()};
+	const char *to_city_param[1] = {to_city_id_s.c_str()};
+	// 读取出发城市下的全部车站名称，填充筛选下拉框。
 	PGresult *from_station_res = PQexecParams(conn, city_station_sql, 1, NULL, from_city_param, NULL, NULL, 0);
+	// 读取到达城市下的全部车站名称，填充筛选下拉框。
 	PGresult *to_station_res = PQexecParams(conn, city_station_sql, 1, NULL, to_city_param, NULL, NULL, 0);
 
 	if (!partial_response) {
@@ -383,12 +597,15 @@ int main() {
 	int from_station_id_filter = 0;
 	int to_station_id_filter = 0;
 	if (!from_station.empty()) {
+
+		// 将出发站名称解析成 station_id，用于后续精确过滤。
 		const char *sid_sql =
 			"SELECT s.station_id::text "
-			"FROM station s JOIN city c ON c.city_id=s.city_id "
-			"WHERE c.city_name=$1 AND s.station_name=$2 "
+			"FROM station s "
+			"WHERE s.city_id=$1::int AND s.station_name=$2 "
 			"LIMIT 1";
-		const char *sid_params[2] = {from_city.c_str(), from_station.c_str()};
+		
+			const char *sid_params[2] = {from_city_id_s.c_str(), from_station.c_str()};
 		PGresult *sid_res = PQexecParams(conn, sid_sql, 2, NULL, sid_params, NULL, NULL, 0);
 		if (PQresultStatus(sid_res) != PGRES_TUPLES_OK || PQntuples(sid_res) == 0) {
 			std::cout << "<p class=\"err\">Invalid from_station for selected city.</p>";
@@ -398,15 +615,19 @@ int main() {
 			return 0;
 		}
 		from_station_id_filter = std::atoi(PQgetvalue(sid_res, 0, 0));
+		// 直达车次按车次和时间聚合后，再按席别补全余票和购票入口。
 		PQclear(sid_res);
 	}
 	if (!to_station.empty()) {
+
+		// 将到达站名称解析成 station_id，用于后续精确过滤。
 		const char *sid_sql =
 			"SELECT s.station_id::text "
-			"FROM station s JOIN city c ON c.city_id=s.city_id "
-			"WHERE c.city_name=$1 AND s.station_name=$2 "
+			"FROM station s "
+			"WHERE s.city_id=$1::int AND s.station_name=$2 "
 			"LIMIT 1";
-		const char *sid_params[2] = {to_city.c_str(), to_station.c_str()};
+
+		const char *sid_params[2] = {to_city_id_s.c_str(), to_station.c_str()};
 		PGresult *sid_res = PQexecParams(conn, sid_sql, 2, NULL, sid_params, NULL, NULL, 0);
 		if (PQresultStatus(sid_res) != PGRES_TUPLES_OK || PQntuples(sid_res) == 0) {
 			std::cout << "<p class=\"err\">Invalid to_station for selected city.</p>";
@@ -422,7 +643,7 @@ int main() {
 	if (partial_response) {
 		std::vector<TransferGroup> transfer_groups;
 		std::string transfer_error;
-		if (!load_transfer_groups(conn, from_city, to_city, date, time, from_station_id_filter, to_station_id_filter, transfer_groups, transfer_error)) {
+		if (!load_transfer_groups(conn, from_city_id, to_city_id, date, time, from_station_id_filter, to_station_id_filter, transfer_groups, transfer_error)) {
 			std::cout << "<div id=\"transfer-panel\"><p class=\"err\">Transfer query failed: "
 				  << m12306::html_escape(transfer_error) << "</p></div>";
 			PQfinish(conn);
@@ -433,33 +654,91 @@ int main() {
 		return 0;
 	}
 
-	const char *direct_sql =
-		"SELECT tp.train_id, s1.station_id, s1.station_name, s2.station_id, s2.station_name, tp.seat_type, "
-		"       ts1.departure_time::text, ts2.arrival_time::text, tp.price::text, "
-		"       COALESCE((SELECT si.remaining FROM seat_inventory si "
-		"                 WHERE si.train_id=tp.train_id AND si.travel_date=$3::date AND si.seat_type=tp.seat_type "
-		"                   AND si.from_station=tp.from_station AND si.to_station=tp.to_station), 5)::text AS left_seat "
-		"FROM ticket_price tp "
-		"JOIN station s1 ON s1.station_id=tp.from_station "
-		"JOIN city c1 ON c1.city_id=s1.city_id "
-		"JOIN station s2 ON s2.station_id=tp.to_station "
-		"JOIN city c2 ON c2.city_id=s2.city_id "
-		"JOIN train_station ts1 ON ts1.train_id=tp.train_id AND ts1.station_id=tp.from_station "
-		"JOIN train_station ts2 ON ts2.train_id=tp.train_id AND ts2.station_id=tp.to_station "
-		"WHERE c1.city_name=$1 AND c2.city_name=$2 AND c1.city_name<>c2.city_name "
-		"  AND ts1.departure_time >= $4::time "
-		"  AND ($5::int=0 OR tp.from_station=$5::int) "
-		"  AND ($6::int=0 OR tp.to_station=$6::int) "
-		"  AND COALESCE((SELECT si.remaining FROM seat_inventory si "
-		"                 WHERE si.train_id=tp.train_id AND si.travel_date=$3::date AND si.seat_type=tp.seat_type "
-		"                   AND si.from_station=tp.from_station AND si.to_station=tp.to_station), 5) > 0 "
-		"ORDER BY ts1.departure_time ASC, tp.price ASC, tp.seat_type ASC, "
-		"  CASE WHEN ts2.arrival_time>=ts1.departure_time THEN ts2.arrival_time-ts1.departure_time "
-		"       ELSE ts2.arrival_time + interval '24 hour' - ts1.departure_time END ASC";
+
+	  // 这段 SQL 直接筛出满足出发城市、到达城市、起始时间和可选站点条件的直达车次。
+  const char *direct_sql =
+      /*
+       * matched_route:
+       * 先筛选出满足出发城市、到达城市、发车时间、可选站点条件的直达票价记录。
+       */
+      "WITH matched_route AS ("
+      "  SELECT "
+      "    tp.train_id, "
+      "    tp.from_station, "
+      "    tp.to_station, "
+      "    tp.seat_type, "
+      "    tp.price, "
+      "    from_station.station_name AS from_station_name, "
+      "    to_station.station_name AS to_station_name, "
+      "    from_stop.departure_time, "
+      "    to_stop.arrival_time "
+
+      "  FROM ticket_price tp "
+
+	"  JOIN station from_station "
+	"    ON from_station.station_id=tp.from_station "//出发站ID关联车站表，拿到车站名称和所属城市ID
+
+	"  JOIN station to_station "
+	"    ON to_station.station_id=tp.to_station "//到达站ID关联车站表，拿到车站名称和所属城市ID
+
+      "  JOIN train_station from_stop "
+      "    ON from_stop.train_id=tp.train_id "
+      "   AND from_stop.station_id=tp.from_station "//关联发车站的车次时刻表记录，拿到发车时间
+
+      "  JOIN train_station to_stop "
+      "    ON to_stop.train_id=tp.train_id "
+      "   AND to_stop.station_id=tp.to_station "//关联到达站的车次时刻表记录，拿到到达时间
+
+	"  WHERE from_station.city_id=$1::int "
+	"    AND to_station.city_id=$2::int "
+	"    AND from_station.city_id<>to_station.city_id "
+      "    AND from_stop.departure_time >= $4::time "
+      "    AND ($5::int=0 OR tp.from_station=$5::int) "//可选的出发站过滤，如果没有指定站点则不过滤
+      "    AND ($6::int=0 OR tp.to_station=$6::int) "//可选的到达站过滤，如果没有指定站点则不过滤
+      "    AND to_stop.station_order > from_stop.station_order"//确保到达站在出发站之后
+      ") "
+
+      /* =======================================================================
+	  主查询：在满足条件的直达区间里，关联库存表拿到余票信息，并只返回有余票的车次。 */
+      "SELECT "
+      "  route.train_id, "
+      "  route.from_station, "
+      "  route.from_station_name, "
+      "  route.to_station, "
+      "  route.to_station_name, "
+      "  route.seat_type, "
+      "  route.departure_time::text, "
+      "  route.arrival_time::text, "
+      "  route.price::text, "
+      "  COALESCE(inventory.remaining, 5)::text AS left_seat "
+
+      "FROM matched_route route "
+
+      "LEFT JOIN seat_inventory inventory "//关联库存表，拿到余票信息
+      "  ON inventory.train_id=route.train_id "
+      " AND inventory.travel_date=$3::date "
+      " AND inventory.seat_type=route.seat_type "
+      " AND inventory.from_station=route.from_station "
+      " AND inventory.to_station=route.to_station "
+
+      /* 只返回有余票的车次 */
+      "WHERE COALESCE(inventory.remaining, 5) > 0 "//如果没有库存记录，默认有 5 张票
+
+      // 排序：
+      "ORDER BY "
+      "  route.departure_time ASC, "// 发车时间早的优先
+      "  route.price ASC, "			// 价格低的优先
+      "  route.seat_type ASC, "		// 席别排序
+      "  CASE "						// 行程时间短的优先，跨天到达时补 24 小时
+      "    WHEN route.arrival_time >= route.departure_time "
+      "    THEN route.arrival_time - route.departure_time "
+      "    ELSE route.arrival_time + interval '24 hour' - route.departure_time "
+      "  END ASC";
+
 
 	std::string from_station_id_s = std::to_string(from_station_id_filter);
 	std::string to_station_id_s = std::to_string(to_station_id_filter);
-	const char *params[6] = {from_city.c_str(), to_city.c_str(), date.c_str(), time.c_str(), from_station_id_s.c_str(), to_station_id_s.c_str()};
+	const char *params[6] = {from_city_id_s.c_str(), to_city_id_s.c_str(), date.c_str(), time.c_str(), from_station_id_s.c_str(), to_station_id_s.c_str()};
 	PGresult *direct = PQexecParams(conn, direct_sql, 6, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(direct) != PGRES_TUPLES_OK) {
 		std::cout << "<p class=\"err\">Direct query failed: "
@@ -550,7 +829,7 @@ int main() {
 
 	std::vector<TransferGroup> transfer_groups;
 	std::string transfer_error;
-	if (!load_transfer_groups(conn, from_city, to_city, date, time, from_station_id_filter, to_station_id_filter, transfer_groups, transfer_error)) {
+	if (!load_transfer_groups(conn, from_city_id, to_city_id, date, time, from_station_id_filter, to_station_id_filter, transfer_groups, transfer_error)) {
 		std::cout << "<p class=\"err\">Transfer query failed: "
 				  << m12306::html_escape(transfer_error) << "</p>";
 		PQfinish(conn);

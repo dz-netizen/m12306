@@ -4,6 +4,7 @@
 #include "m12306_common.h"
 
 static bool exists_value(PGconn *conn, const char *sql, const std::string &value) {
+	// 通用存在性检查：由调用方传入 COUNT(*) 查询，返回是否已存在。
 	const char *params[1] = {value.c_str()};
 	PGresult *res = PQexecParams(conn, sql, 1, NULL, params, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -67,6 +68,7 @@ int main() {
 	}
 
 	if (exists_value(conn, "SELECT COUNT(*) FROM user_info WHERE username=$1", username)) {
+		// 用户已存在时只更新密码，避免重复注册同名账户。
 		const char *upd_sql = "UPDATE user_info SET password=$2 WHERE username=$1";
 		const char *upd_params[2] = {username.c_str(), password.c_str()};
 		PGresult *upd = PQexecParams(conn, upd_sql, 2, NULL, upd_params, NULL, NULL, 0);
@@ -92,6 +94,7 @@ int main() {
 		return 0;
 	}
 
+	// 新用户直接插入到 user_info 表。
 	const char *sql =
 		"INSERT INTO user_info(username, phone, name, password) "
 		"VALUES($1,$2,$3,$4)";
