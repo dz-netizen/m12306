@@ -1,0 +1,372 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{ctex}
+\usepackage{fancyhdr}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage{diagbox}
+\usepackage[table]{xcolor}
+\usepackage{subcaption}
+\usepackage[colorlinks,linkcolor=blue]{hyperref}
+
+% 文章页面margin设置
+\usepackage[a4paper]{geometry}
+\geometry{top=1in}
+\geometry{bottom=1in}
+\geometry{left=0.75in}
+\geometry{right=0.75in}
+\geometry{marginparwidth=1.75cm}
+
+% 设置页眉
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{数据库系统 实验报告}
+\rhead{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% 代码设置
+\lstset{
+    basicstyle=\ttfamily\small,
+    numbers=left,
+    numberstyle=\tiny,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    breaklines=true,
+    frame=single,
+    showstringspaces=false,
+    language=SQL,
+    extendedchars=false % 解决代码块中文显示问题
+}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE\textbf{火车订票系统设计报告}}
+
+    \vspace{1cm}
+
+    \begin{tabular}{rl}
+        组长： & 张超超 \quad 学号：2023K8009906024 \\
+        组员： & 朱首赫 \quad 学号：2023K8009906029 \\
+        组员： & 冯曦熠 \quad 学号：2023K8009909006 
+    \end{tabular}
+\end{center}
+
+\setcounter{section}{-1}
+\section{分工说明}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{成员} & \textbf{负责模块} \\
+        \midrule
+        合作完成 & 系统架构设计、需求对照检查、集成测试 \\
+        张超超 & 关系模式设计、核心查询功能实现、用户认证实现、订票与订单管理、管理员功能实现 \\
+        朱首赫 & 代码审查与功能整合、项目结构规范化、ER图绘制、范式细化分析、SQL分析 \\
+        冯曦熠 & 需求功能测试与验证、前端页面设计与美化、用户交互功能优化 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{总体设计说明}
+
+\subsection{系统架构}
+本系统采用 Web 应用的三层结构，具体实现如下表所示：
+
+\begin{table}[H]
+    \centering
+    \caption{系统三层架构}
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{层次} & \textbf{技术实现} & \textbf{说明} \\
+        \midrule
+        展示层 & HTML + JavaScript & 提供用户交互界面 \\
+        中间层 & C++ CGI & 处理业务逻辑，连接数据库 \\
+        数据管理层 & PostgreSQL & 存储所有业务数据 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{核心功能}
+系统实现了以下 9 个具体功能需求：
+\begin{enumerate}
+    \item \textbf{记录列车信息}：包括车次、站点、到发时间、票价。
+    \item \textbf{记录座位情况}：支持座位在不同行程段内的复用。
+    \item \textbf{乘客信息管理}：支持用户注册与登录。
+    \item \textbf{查询车次}：支持通过具体车次号进行查询。
+    \item \textbf{查询两地间车次}：支持直达路径及一次换乘路径的搜索。
+    \item \textbf{查询返程信息}：基于当前查询快速切换出发与目的地。
+    \item \textbf{预订车次座位}：实现订票业务逻辑。
+    \item \textbf{管理订单}：支持历史订单查询与退票（取消订单）功能。
+    \item \textbf{管理员界面}：提供全局业务数据的统计与监控。
+\end{enumerate}
+
+\section{数据处理说明}
+
+\subsection{原始数据与预处理}
+系统使用 2026 年 3 月的全国高铁数据（共计 8500+ 个车次）。通过 Python 脚本 \texttt{generate\_import\_files.py} 将原始 \texttt{.txt} 文件转换为 \texttt{.tbl} 文件，最后利用 PostgreSQL 的 \texttt{\textbackslash copy} 指令高效导入。
+
+\subsection{票价计算规则}
+由于原始票价为“始发站至当前站”的累计值，非始发站间的票价采用差值计算：
+\[ \text{票价}_{A \to C} = \text{票价}_{\text{始发} \to C} - \text{票价}_{\text{始发} \to A} \]
+本实验忽略卧铺信息，仅处理二等座、一等座及商务座。
+
+\section{ER 图}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=19cm]{database/fig/er.png} % 请确保图片在同一目录下或路径正确
+    \caption{ER图}
+    \label{fig:er}
+\end{figure}
+
+\section{关系模式设计}
+
+\subsection{基础信息表}
+
+\textbf{1. City（城市表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{city\_id} & SERIAL & 城市编号（主键） \\
+        city\_name & VARCHAR(50) & 城市名称（唯一） \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\textbf{2. Station（车站表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{station\_id} & SERIAL & 车站编号（主键） \\
+        station\_name & VARCHAR(20) & 车站名称 \\
+        city\_id & INT & 所属城市编号（外键） \\
+        \bottomrule
+    \end{tabular}
+    \par 约束：\texttt{UNIQUE(station\_name, city\_id)}
+\end{table}
+
+\textbf{3. Train（列车表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{train\_id} & VARCHAR(10) & 车次编号（主键） \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{运营与票务表}
+
+\textbf{4. Train\_Station（列车经停信息表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{id} & SERIAL & 记录编号（主键） \\
+        train\_id & VARCHAR(10) & 车次编号（外键） \\
+        station\_id & INT & 车站编号（外键） \\
+        station\_order & INT & 该车站在车次中的顺序 \\
+        arrival\_time & TIME & 到达时间 \\
+        departure\_time & TIME & 发车时间 \\
+        \bottomrule
+    \end{tabular}
+    \par 约束：\texttt{UNIQUE(train\_id, station\_order), UNIQUE(train\_id, station\_id)}
+\end{table}
+
+\textbf{5. Ticket\_Price（票价表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{train\_id} & VARCHAR(10) & 车次编号（联合主键） \\
+        \underline{from\_station} & INT & 起始站编号（联合主键） \\
+        \underline{to\_station} & INT & 终点站编号（联合主键） \\
+        \underline{seat\_type} & VARCHAR(20) & 座位类型（联合主键） \\
+        price & DECIMAL(10,2) & 票价 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\textbf{6. Seat\_Inventory（座位库存表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{train\_id} & VARCHAR(10) & 车次编号（联合主键） \\
+        \underline{travel\_date} & DATE & 出行日期（联合主键） \\
+        \underline{seat\_type} & VARCHAR(20) & 座位类型（联合主键） \\
+        \underline{from\_station} & INT & 起始站编号（联合主键） \\
+        \underline{to\_station} & INT & 终点站编号（联合主键） \\
+        remaining & INT & 剩余座位数 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{用户与交易表}
+
+\textbf{7. User\_Info（用户表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{user\_id} & SERIAL & 用户编号（主键） \\
+        username & VARCHAR(20) & 用户名（唯一） \\
+        phone & VARCHAR(11) & 手机号（唯一） \\
+        name & VARCHAR(20) & 真实姓名 \\
+        password & VARCHAR(100) & 密码 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\textbf{8. Orders（订单表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{order\_id} & SERIAL & 订单编号（主键） \\
+        user\_id & INT & 用户编号（外键） \\
+        total\_price & DECIMAL(10,2) & 订单总价 \\
+        status & VARCHAR(10) & 订单状态（正常/取消） \\
+        create\_time & TIMESTAMP & 下单时间 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\textbf{9. Order\_Item（订单明细表）}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{列属性} & \textbf{类型} & \textbf{描述} \\
+        \midrule
+        \underline{id} & SERIAL & 记录编号（主键） \\
+        order\_id & INT & 订单编号（外键） \\
+        train\_id & VARCHAR(10) & 车次编号 \\
+        from\_station & INT & 起始站编号 \\
+        to\_station & INT & 终点站编号 \\
+        seat\_type & VARCHAR(20) & 座位类型 \\
+        price & DECIMAL(10,2) & 该段票价 \\
+        travel\_date & DATE & 出行日期 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{范式细化分析}
+本节对数据库核心表进行函数依赖（FD）分析，并基于判定条件证明其规范化程度。
+
+\subsection{基础地理信息：City 与 Station}
+\begin{itemize}
+    \item \textbf{City 表}：候选键为 \texttt{city\_id} 或 \texttt{city\_name}。决定因素均为候选键，满足 BCNF。
+    \item \textbf{Station 表}：候选键为 \texttt{station\_id} 或 \texttt{(station\_name, city\_id)}。每一个行列决定因素都是候选键，不存在传递依赖，满足 BCNF。
+\end{itemize}
+
+\subsection{运行逻辑：Train\_Station 表}
+候选键为 \texttt{id}、\texttt{(train\_id, station\_order)} 或 \texttt{(train\_id, station\_id)}。决定因素均为候选键，不存在非主属性间的传递依赖，满足 BCNF。
+
+\subsection{定价与库存：Ticket\_Price 与 Seat\_Inventory}
+这两张表作为关联实体，其属性对候选键具有完全函数依赖关系。票价和库存均由其复合主键唯一确定，满足 BCNF。
+
+\subsection{用户与订单模块}
+\texttt{User\_Info}、\texttt{Orders} 及 \texttt{Order\_Item} 的所有非键属性均直接依赖于主键，无部分或传递依赖，均满足 BCNF。
+
+\section{核心功能 SQL 实现}
+
+\subsection{需求1：记录列车信息}
+\begin{lstlisting}[caption=创建列车经停信息表]
+CREATE TABLE Train_Station (
+    id SERIAL PRIMARY KEY,
+    train_id VARCHAR(10) REFERENCES Train(train_id),
+    station_id INT REFERENCES Station(station_id),
+    station_order INT NOT NULL, -- 车站顺序
+    arrival_time TIME,          -- 到达时间
+    departure_time TIME,        -- 发车时间
+    UNIQUE (train_id, station_order),
+    UNIQUE (train_id, station_id)
+);
+\end{lstlisting}
+
+\subsection{需求2：记录座位情况}
+\begin{lstlisting}[caption=座位库存初始化]
+INSERT INTO seat_inventory(train_id, travel_date, seat_type, from_station, to_station, remaining)
+SELECT tp.train_id, $2::date, tp.seat_type, tp.from_station, tp.to_station, 5 -- 默认5个座位
+FROM ticket_price tp
+WHERE tp.train_id = $1
+ON CONFLICT (train_id, travel_date, seat_type, from_station, to_station) DO NOTHING;
+\end{lstlisting}
+
+\subsection{需求4：查询车次}
+\begin{lstlisting}[caption=查询车次经停站及余票]
+WITH start_station AS (
+    SELECT station_id AS start_sid FROM train_station
+    WHERE train_id = $1 ORDER BY station_order LIMIT 1
+)
+SELECT ts.station_order, c.city_name, s.station_name,
+       COALESCE(ts.arrival_time::text, '-') AS arr,
+       COALESCE(ts.departure_time::text, '-') AS dep,
+       COALESCE(tp.price::text, '-') AS fare,
+       CASE WHEN ts.station_order = 1 THEN 0 ELSE COALESCE((
+           SELECT MIN(si.remaining) FROM seat_inventory si
+           WHERE si.train_id = $1 AND si.travel_date = $2::date AND si.seat_type = $3
+       ), 5) END AS left_seat, ts.station_id
+FROM train_station ts
+JOIN station s ON s.station_id = ts.station_id
+JOIN city c ON c.city_id = s.city_id
+LEFT JOIN start_station ss ON TRUE
+LEFT JOIN ticket_price tp ON tp.train_id = ts.train_id AND tp.from_station = ss.start_sid AND tp.to_station = ts.station_id AND tp.seat_type = $3
+WHERE ts.train_id = $1 ORDER BY ts.station_order;
+\end{lstlisting}
+
+\subsection{需求7：预订车次座位}
+\begin{lstlisting}[caption=订票事务处理]
+BEGIN;
+-- 1. 锁定并检查库存
+SELECT remaining FROM seat_inventory
+WHERE train_id = $1 AND travel_date = $2::date AND seat_type = $3
+AND from_station = $4::int AND to_station = $5::int FOR UPDATE;
+
+-- 2. 创建订单
+INSERT INTO orders (user_id, total_price, status)
+VALUES ($1::int, $2::numeric, '正常') RETURNING order_id;
+
+-- 3. 添加明细与扣减库存
+UPDATE seat_inventory SET remaining = remaining - 1
+WHERE train_id = $1 AND travel_date = $2::date AND seat_type = $3
+AND from_station = $4::int AND to_station = $5::int;
+COMMIT;
+\end{lstlisting}
+
+\subsection{需求9：管理员界面}
+\begin{lstlisting}[caption=热点车次排行统计]
+SELECT oi.train_id, COUNT(*)::text cnt
+FROM order_item oi
+JOIN orders o ON o.order_id = oi.order_id
+WHERE o.status = '正常'
+GROUP BY oi.train_id
+ORDER BY cnt::int DESC LIMIT 10;
+\end{lstlisting}
+
+\end{document}
