@@ -295,78 +295,184 @@
 
 \section{核心功能 SQL 实现}
 
+本节不逐行列出源码中的 SQL，而是按功能需求说明系统使用的 SQL 类型、完成的数据库操作以及对应的关系代数思想。为简化表示，记 \texttt{City} 为 $C$，\texttt{Station} 为 $S$，\texttt{Train} 为 $T$，\texttt{Train\_Station} 为 $TS$，\texttt{Ticket\_Price} 为 $TP$，\texttt{Seat\_Inventory} 为 $SI$，\texttt{User\_Info} 为 $U$，\texttt{Orders} 为 $O$，\texttt{Order\_Item} 为 $OI$。
+
 \subsection{需求1：记录列车信息}
-\begin{lstlisting}[caption=创建列车经停信息表]
-CREATE TABLE Train_Station (
-    id SERIAL PRIMARY KEY,
-    train_id VARCHAR(10) REFERENCES Train(train_id),
-    station_id INT REFERENCES Station(station_id),
-    station_order INT NOT NULL, -- 车站顺序
-    arrival_time TIME,          -- 到达时间
-    departure_time TIME,        -- 发车时间
-    UNIQUE (train_id, station_order),
-    UNIQUE (train_id, station_id)
-);
-\end{lstlisting}
+
+该需求主要由建表约束和数据导入操作完成。系统使用 \texttt{CREATE TABLE} 定义 \texttt{Train}、\texttt{Station}、\texttt{Train\_Station} 和 \texttt{Ticket\_Price} 等关系表，并通过 \texttt{COPY} 导入预处理后的车次、车站、经停顺序、到发时间和票价数据。
+
+\begin{itemize}
+    \item 车次编号由 $T$ 保存；车站名称、所属城市由 $S \bowtie C$ 表示，其中 \texttt{station\_name} 使用 \texttt{VARCHAR(20)} 满足站名长度约束。
+    \item 列车经停详情由 $TS$ 保存，\texttt{UNIQUE(train\_id, station\_order)} 保证同一车次站序唯一，\texttt{UNIQUE(train\_id, station\_id)} 保证同一车站在同一车次中不重复出现。
+    \item 票价由 $TP$ 保存，主键为车次、起点站、终点站和席别的组合，系统用 \texttt{seat\_type} 区分二等座、一等座和商务座。
+    \item 列车每天准时运行、票价固定不变的假设体现在：时刻表和票价表作为静态基础数据导入后不随日期更新，日期只影响库存和订单。
+\end{itemize}
+
+查询某车次完整经停信息时，对 $TS$、$S$、$C$ 做连接，并按站序排序：
+\[
+R_{train}=\pi_{order,city,station,arrival,departure}
+(\sigma_{train=t}(TS) \bowtie S \bowtie C)
+\]
 
 \subsection{需求2：记录座位情况}
-\begin{lstlisting}[caption=座位库存初始化]
-INSERT INTO seat_inventory(train_id, travel_date, seat_type, from_station, to_station, remaining)
-SELECT tp.train_id, $2::date, tp.seat_type, tp.from_station, tp.to_station, 5 -- 默认5个座位
-FROM ticket_price tp
-WHERE tp.train_id = $1
-ON CONFLICT (train_id, travel_date, seat_type, from_station, to_station) DO NOTHING;
-\end{lstlisting}
+
+该需求由 \texttt{Seat\_Inventory} 表和库存初始化、库存扣减两类操作完成。库存表的主键包含车次、日期、席别、起点站和终点站，因此库存不是按整趟车保存，而是按区间保存。
+
+\begin{itemize}
+    \item 初始化库存时，系统对指定车次和日期执行 \texttt{INSERT ... SELECT}：从 $TP$ 中取出该车所有可售区间和席别，插入到 $SI$ 中，\texttt{remaining} 初始值为 5；若记录已存在，则通过 \texttt{ON CONFLICT DO NOTHING} 保持原库存。
+    \item 查询余票时，若某日期尚未显式生成库存记录，则用 \texttt{COALESCE} 将余票视为默认值 5。
+    \item 座位共享通过区间库存实现。一次订票只影响与所购区间重叠的库存区间；不重叠区间不会被扣减，因此同一座位可在前一乘客下车后继续售卖给后续区间乘客。
+\end{itemize}
+
+设用户购买区间为 $(a,b)$，库存区间为 $(x,y)$，二者重叠条件为：
+\[
+x < b \land a < y
+\]
+订票时需要锁定并扣减的库存集合为：
+\[
+I_{overlap}=\sigma_{x<b \land a<y}(SI \bowtie TS_x \bowtie TS_y)
+\]
+
+\subsection{需求3：乘客信息管理}
+
+注册和登录分别由 \texttt{register.cgi} 与 \texttt{login.cgi} 完成。
+
+\begin{itemize}
+    \item 注册前先在 $U$ 上执行选择和聚合检查：按用户名统计是否已存在、按手机号统计是否已存在；手机号还在程序层检查是否为 11 位数字。
+    \item 若用户名已存在，当前实现执行更新操作，只修改该用户名对应用户的密码；若用户名不存在且手机号未占用，则向 $U$ 插入新元组。
+    \item 登录时在 $U$ 上按用户名选择用户记录，取出用户编号、真实姓名和密码；程序比较密码后，普通用户进入首页，管理员用户跳转到管理界面。
+    \item 首页再次通过用户名查询用户编号，确认用户存在后展示车次查询、线路查询和订单管理入口。
+\end{itemize}
+
+注册检查可表示为：
+\[
+count(\sigma_{username=u}(U)),\quad count(\sigma_{phone=p}(U))
+\]
+登录验证可表示为：
+\[
+\pi_{user\_id,name,password}(\sigma_{username=u}(U))
+\]
 
 \subsection{需求4：查询车次}
-\begin{lstlisting}[caption=查询车次经停站及余票]
-WITH start_station AS (
-    SELECT station_id AS start_sid FROM train_station
-    WHERE train_id = $1 ORDER BY station_order LIMIT 1
-)
-SELECT ts.station_order, c.city_name, s.station_name,
-       COALESCE(ts.arrival_time::text, '-') AS arr,
-       COALESCE(ts.departure_time::text, '-') AS dep,
-       COALESCE(tp.price::text, '-') AS fare,
-       CASE WHEN ts.station_order = 1 THEN 0 ELSE COALESCE((
-           SELECT MIN(si.remaining) FROM seat_inventory si
-           WHERE si.train_id = $1 AND si.travel_date = $2::date AND si.seat_type = $3
-       ), 5) END AS left_seat, ts.station_id
-FROM train_station ts
-JOIN station s ON s.station_id = ts.station_id
-JOIN city c ON c.city_id = s.city_id
-LEFT JOIN start_station ss ON TRUE
-LEFT JOIN ticket_price tp ON tp.train_id = ts.train_id AND tp.from_station = ss.start_sid AND tp.to_station = ts.station_id AND tp.seat_type = $3
-WHERE ts.train_id = $1 ORDER BY ts.station_order;
-\end{lstlisting}
+
+单车次查询由 \texttt{query\_train.cgi} 完成，输入为车次号和日期。程序首先检查日期必须晚于当天，然后为该车次和日期初始化库存。
+
+\begin{itemize}
+    \item 席别查询：从 $TP$ 中选择该车次存在的所有 \texttt{seat\_type}，并按商务座、一等座、二等座排序。
+    \item 静态信息查询：对 $TS$、$S$、$C$ 进行连接，得到每站城市、站名、到达时间、发车时间，并按 \texttt{station\_order} 排序。
+    \item 票价查询：先取该车次始发站，再将 $TP$ 与当前站连接，得到“始发站到当前站”的对应席别票价。
+    \item 动态余票查询：在 $SI$ 中按车次、日期和席别选择库存记录，并对覆盖当前到达站的库存取最小值，作为该站可展示余票。
+    \item 跳转订票：若当前站不是始发站、票价存在且余票大于 0，则生成到 \texttt{book.cgi} 的订票参数；页面还提供任意起终站区间选择表单。
+\end{itemize}
+
+核心关系运算为：
+\[
+R_{stop}=\pi_{order,city,station,arr,dep,fare,left}
+(\sigma_{train=t}(TS) \bowtie S \bowtie C \bowtie TP \bowtie SI)
+\]
+其中 $fare$ 来自票价关系 $TP$，$left$ 来自库存关系 $SI$ 的聚合最小值。
+
+\subsection{需求5：查询两地间车次}
+
+两地查询由 \texttt{query\_route.cgi} 完成。程序先将出发城市名、到达城市名转换为城市编号，避免后续查询反复按城市名连接；同时支持可选的出发站和到达站精确过滤。
+
+\textbf{直达查询}：系统从 $TP$ 出发，连接起点站、终点站以及两端在 $TS$ 中的时刻记录，筛选出出发城市、到达城市、发车时间和可选站点均满足条件的票价区间；再左连接 $SI$ 获得余票，只保留余票大于 0 的结果。结果在程序中按车次和时间分组，并为商务座、一等座、二等座分别展示票价、余票和购票入口。
+
+直达候选可表示为：
+\[
+D=\sigma_{city_f=c_f \land city_t=c_t \land dep\geq time \land order_f<order_t}
+(TP \bowtie S_f \bowtie S_t \bowtie TS_f \bowtie TS_t \bowtie SI)
+\]
+
+\textbf{中转查询}：系统使用多阶段关系运算生成一次换乘方案。
+
+\begin{enumerate}
+    \item 第一程候选 \texttt{first\_leg}：从出发城市到非出发、非到达城市的中转站，要求发车时间不早于输入时间。
+    \item 第二程候选 \texttt{second\_leg}：从同一中转城市出发到目标城市，要求到达站在第二程出发站之后。
+    \item 候选组合 \texttt{transfer\_candidates}：连接第一程和第二程，要求两段席别相同、车次不同、中转城市相同。
+    \item 可用性过滤 \texttt{available\_candidates}：分别连接两段库存，取两段余票最小值作为总余票，并过滤无票方案。
+    \item 排名去重 \texttt{ranked\_candidates}：对同一组“第一程车次、第二程车次、席别”按总价排名，只保留价格最低的方案。
+\end{enumerate}
+
+中转换乘时间约束为：同站换乘等待 1--4 小时；异站但同城换乘等待 2--4 小时。可表示为：
+\[
+Transfer=\sigma_{sameCity \land train_1\neq train_2 \land seat_1=seat_2 \land timeWindow}
+(FirstLeg \bowtie SecondLeg)
+\]
+其中：
+\[
+timeWindow=(sameStation \land 1h\leq wait\leq4h)\lor(\neg sameStation \land 2h\leq wait\leq4h)
+\]
+中转结果由程序分页展示，每页最多 20 个中转组合。
+
+\subsection{需求6：查询返程信息}
+
+返程查询不需要新增数据库关系或新的 SQL 模板，而是复用需求5的两地查询逻辑。页面在正向查询结果末尾生成返程链接，将出发城市和到达城市参数对调，并附带日期、时间等查询参数；用户点击后再次执行需求5中的直达查询和中转查询。
+
+从关系运算角度看，返程只是将选择条件中的城市参数交换：
+\[
+Route(c_f,c_t,d,t) \Rightarrow Route(c_t,c_f,d',t')
+\]
 
 \subsection{需求7：预订车次座位}
-\begin{lstlisting}[caption=订票事务处理]
-BEGIN;
--- 1. 锁定并检查库存
-SELECT remaining FROM seat_inventory
-WHERE train_id = $1 AND travel_date = $2::date AND seat_type = $3
-AND from_station = $4::int AND to_station = $5::int FOR UPDATE;
 
--- 2. 创建订单
-INSERT INTO orders (user_id, total_price, status)
-VALUES ($1::int, $2::numeric, '正常') RETURNING order_id;
+订票由 \texttt{book.cgi} 完成，分为确认页和正式提交两步。正式提交时使用事务保证订单、订单明细和库存更新的一致性。
 
--- 3. 添加明细与扣减库存
-UPDATE seat_inventory SET remaining = remaining - 1
-WHERE train_id = $1 AND travel_date = $2::date AND seat_type = $3
-AND from_station = $4::int AND to_station = $5::int;
-COMMIT;
-\end{lstlisting}
+\begin{itemize}
+    \item 费用计算：先从 $TP$ 中查询所选车次、区间和席别的票价，并连接 $S$ 获得起终站名称；单程总价为票价加 5 元订票费，换乘订单总价为两段票价之和加 10 元订票费。
+    \item 事务开始后，先锁定当前用户记录，防止同一用户并发提交多个相互冲突的订单。
+    \item 时间冲突检查：构造新订单行程时间区间，并与该用户已有正常订单的每段行程区间比较；若满足“已有出发时间早于新到达时间，且新出发时间早于已有到达时间”，则判定为时间重叠并回滚。
+    \item 库存检查：对购买区间对应的重叠库存记录执行 \texttt{SELECT ... FOR UPDATE}，取最小余票判断是否仍可售。
+    \item 库存更新：对所有与购买区间重叠的 $SI$ 记录执行扣减操作。
+    \item 订单生成：向 $O$ 插入订单主表记录并返回订单号；单程插入一条 $OI$ 明细，换乘插入两条 $OI$ 明细；全部成功后提交事务，否则回滚。
+\end{itemize}
+
+时间冲突检查可表示为：
+\[
+Conflict=\exists e\in ExistingOrders,
+(e_{dep}<n_{arr})\land(n_{dep}<e_{arr})
+\]
+库存扣减对象仍为需求2中的 $I_{overlap}$。
+
+\subsection{需求8：管理订单}
+
+订单管理由 \texttt{orders.cgi} 完成，包括日期范围查询、订单详情和取消订单。
+
+\begin{itemize}
+    \item 订单列表查询：在 $O$ 中按当前用户编号和创建日期范围选择订单；通过横向子查询聚合 $OI$ 中的车次链和席别链；再取第一段起点、最后一段终点，并连接 $S$ 和 $TS$ 得到起终站名、首段出发时间和末段到达时间。
+    \item 订单详情查询：连接 $OI$、$O$、$S$ 和 $TS$，展开订单中每个程段的车次、起终站、乘车日期、到发时间、席别和价格。
+    \item 取消订单：事务内先按订单号和用户编号锁定订单，确认状态为“正常”；再遍历订单明细，对每段对应的库存执行加一操作；最后将订单状态更新为“取消”并提交。
+\end{itemize}
+
+订单列表的核心关系运算为：
+\[
+R_{orders}=\pi_{order,date,trains,seats,from,to,dep,arr,total,status}
+(\sigma_{user=u\land date\in[l,r]}(O) \bowtie OI \bowtie S \bowtie TS)
+\]
+取消订单的更新逻辑可概括为：
+\[
+O.status \leftarrow \text{取消},\quad SI.remaining \leftarrow SI.remaining+1
+\]
 
 \subsection{需求9：管理员界面}
-\begin{lstlisting}[caption=热点车次排行统计]
-SELECT oi.train_id, COUNT(*)::text cnt
-FROM order_item oi
-JOIN orders o ON o.order_id = oi.order_id
-WHERE o.status = '正常'
-GROUP BY oi.train_id
-ORDER BY cnt::int DESC LIMIT 10;
-\end{lstlisting}
+
+管理员界面由 \texttt{admin.cgi} 完成。登录时系统会确保固定管理员账户 \texttt{admin} 存在；访问管理界面前通过用户名判断是否为管理员。
+
+\begin{itemize}
+    \item 总订单数：对 $O$ 中状态为“正常”的订单执行计数聚合。
+    \item 总成交金额：对 $O$ 中状态为“正常”的订单执行总价求和聚合。
+    \item 热点车次排行：将 $OI$ 与 $O$ 连接，只统计正常订单中的车次订票次数；再与 $T$ 左连接，使没有订单的车次也可参与排序；最终按订票数降序、车次号升序取前 10。
+    \item 注册用户列表：按用户编号顺序投影 $U$ 中的用户名、真实姓名和手机号。
+    \item 指定用户订单查看：按用户名连接 $U$ 与 $O$，并通过横向聚合查询该用户订单中的车次链、席别链、首段出发时间和末段到达时间。
+\end{itemize}
+
+热点车次统计对应的聚合关系运算为：
+\[
+HotTrain=\tau_{cnt\downarrow}(\gamma_{train;count(*)\rightarrow cnt}(\sigma_{status=normal}(O) \bowtie OI))
+\]
+取排序后的前 10 条即为管理员看板中的热门车次排行。
 
 \end{document}
+
+
+
