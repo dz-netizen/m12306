@@ -2,6 +2,34 @@
 
 #include "m12306_common.h"
 
+static bool inc_inventory(PGconn *conn,
+	const char *train_id,
+	const char *date,
+	const char *seat_type,
+	const char *from_sid,
+	const char *to_sid) {
+	const char *sql =
+		"WITH req AS ("
+		"  SELECT rf.station_order AS req_from_order, rt.station_order AS req_to_order "
+		"  FROM train_station rf "
+		"  JOIN train_station rt ON rt.train_id=rf.train_id "
+		"  WHERE rf.train_id=$1 AND rf.station_id=$4::int AND rt.station_id=$5::int) "
+		"UPDATE seat_inventory si "
+		"SET remaining=remaining+1 "
+		"FROM train_station ts_from, train_station ts_to, req r "
+		"WHERE si.train_id=$1 AND si.travel_date=$2::date AND si.seat_type=$3 "
+		"  AND ts_from.train_id=si.train_id AND ts_from.station_id=si.from_station "
+		"  AND ts_to.train_id=si.train_id AND ts_to.station_id=si.to_station "
+		"  AND r.req_from_order < r.req_to_order "
+		"  AND ts_from.station_order < r.req_to_order "
+		"  AND r.req_from_order < ts_to.station_order";
+	const char *params[5] = {train_id, date, seat_type, from_sid, to_sid};
+	PGresult *res = PQexecParams(conn, sql, 5, NULL, params, NULL, NULL, 0);
+	bool ok = (PQresultStatus(res) == PGRES_COMMAND_OK && std::atoi(PQcmdTuples(res)) > 0);
+	PQclear(res);
+	return ok;
+}
+
 int main() {
 	cgicc::Cgicc form;
 	std::string username = m12306::get_form_value(form, "username");
@@ -49,30 +77,42 @@ int main() {
 						&& std::string(PQgetvalue(lk, 0, 0)) == "正常");
 		PQclear(lk);
 		if (can_cancel) {
-			// 取出订单明细，逐段把库存回滚。
+			// 取出订单明细，逐段把与该行程重叠的库存区间回滚。
 			const char *item_sql = "SELECT train_id, seat_type, from_station, to_station, travel_date::text FROM order_item WHERE order_id=$1::int";
 			const char *ip[1] = {order_id.c_str()};
 			PGresult *it = PQexecParams(conn, item_sql, 1, NULL, ip, NULL, NULL, 0);
-			if (PQresultStatus(it) == PGRES_TUPLES_OK) {
+			bool restored = (PQresultStatus(it) == PGRES_TUPLES_OK);
+			if (restored) {
 				for (int i = 0; i < PQntuples(it); ++i) {
-					const char *up_sql =
-						"UPDATE seat_inventory SET remaining=remaining+1 "
-						"WHERE train_id=$1 AND seat_type=$2 AND from_station=$3::int AND to_station=$4::int AND travel_date=$5::date";
-					const char *up[5] = {
-						PQgetvalue(it, i, 0), PQgetvalue(it, i, 1), PQgetvalue(it, i, 2),
-						PQgetvalue(it, i, 3), PQgetvalue(it, i, 4)
-					};
-					PGresult *u = PQexecParams(conn, up_sql, 5, NULL, up, NULL, NULL, 0);
-					PQclear(u);
+					if (!inc_inventory(conn,
+						PQgetvalue(it, i, 0),
+						PQgetvalue(it, i, 4),
+						PQgetvalue(it, i, 1),
+						PQgetvalue(it, i, 2),
+						PQgetvalue(it, i, 3))) {
+						restored = false;
+						break;
+					}
 				}
 			}
 			PQclear(it);
-			PGresult *oc = PQexecParams(conn,
-				"UPDATE orders SET status='取消' WHERE order_id=$1::int AND user_id=$2::int",
-				2, NULL, lp, NULL, NULL, 0);
-			PQclear(oc);
-			m12306::exec_ok(conn, "COMMIT");
-			std::cout << "<div class=\"message ok\">订\u5355\u5df2\u53d6\u6d88: " << m12306::html_escape(order_id) << "</div>";
+			if (!restored) {
+				m12306::exec_ok(conn, "ROLLBACK");
+				std::cout << "<div class=\"message err\">订单取消失败。</div>";
+			} else {
+				PGresult *oc = PQexecParams(conn,
+					"UPDATE orders SET status='取消' WHERE order_id=$1::int AND user_id=$2::int",
+					2, NULL, lp, NULL, NULL, 0);
+				bool status_updated = (PQresultStatus(oc) == PGRES_COMMAND_OK);
+				PQclear(oc);
+				if (status_updated) {
+					m12306::exec_ok(conn, "COMMIT");
+					std::cout << "<div class=\"message ok\">订单已取消: " << m12306::html_escape(order_id) << "</div>";
+				} else {
+					m12306::exec_ok(conn, "ROLLBACK");
+					std::cout << "<div class=\"message err\">订单取消失败。</div>";
+				}
+			}
 		} else {
 			m12306::exec_ok(conn, "ROLLBACK");
 			std::cout << "<div class=\"message err\">订\u5355\u65e0\u6cd5\u53d6\u6d88\u3002</div>";
