@@ -44,7 +44,7 @@ static bool schemaColMatch(const RequestColumn &rc, const SchemaCol &sc)
 {
     if (!isQualifiedSuffixMatch(rc.name, sc.name)) return false;
     // Require aggregate method match to disambiguate duplicates (e.g., SUM(col) vs MAX(col)).
-    return sc.aggr == rc.aggrerate_method;
+    return sc.aggr == rc.aggregate_method;
 }
 
 static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const RequestColumn &rc)
@@ -53,7 +53,7 @@ static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const Requ
         if (schemaColMatch(rc, schema[i])) return (int) i;
     }
     // fallback: allow matching by name only when request has NONE_AM and schema has NONE_AM
-    if (rc.aggrerate_method == NONE_AM) {
+    if (rc.aggregate_method == NONE_AM) {
         for (size_t i = 0; i < schema.size(); i++) {
             if (schema[i].aggr != NONE_AM) continue;
             if (isQualifiedSuffixMatch(rc.name, schema[i].name)) return (int) i;
@@ -62,7 +62,7 @@ static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const Requ
     return -1;
 }
 
-static BasicType *aggOutType(AggrerateMethod m, BasicType *in)
+static BasicType *aggOutType(AggregateMethod m, BasicType *in)
 {
     static TypeInt64 s_int64;
     static TypeFloat64 s_f64;
@@ -322,7 +322,7 @@ bool OrderByOperator::compileKeys(const RequestColumn *orderby, int orderby_num)
         if (idx < 0) {
             // best effort: for NONE_AM, match name-only among NONE_AM columns
             RequestColumn tmp = orderby[i];
-            tmp.aggrerate_method = NONE_AM;
+            tmp.aggregate_method = NONE_AM;
             idx = findSchemaIndex(tmp);
         }
         if (idx < 0) {
@@ -509,12 +509,12 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
 
     // aggregations (in select order, keep duplicates distinguished by method)
     for (int i = 0; i < select_num; i++) {
-        if (select[i].aggrerate_method == NONE_AM) continue;
+        if (select[i].aggregate_method == NONE_AM) continue;
         int inIdx = findInSchemaIndex(select[i]);
         if (inIdx < 0) {
             // for aggregates, match just by name when input schema has NONE_AM
             RequestColumn tmp = select[i];
-            tmp.aggrerate_method = NONE_AM;
+            tmp.aggregate_method = NONE_AM;
             inIdx = findInSchemaIndex(tmp);
         }
         if (inIdx < 0) {
@@ -523,7 +523,7 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
         }
 
         BasicType *inType = gb_in_schema[inIdx].type;
-        BasicType *outType = aggOutType(select[i].aggrerate_method, inType);
+        BasicType *outType = aggOutType(select[i].aggregate_method, inType);
         if (outType == NULL) return false;
 
         SchemaCol sc;
@@ -532,12 +532,12 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
         sc.type = outType;
         sc.offset = gb_out_len;
         sc.len = outType->getTypeSize();
-        sc.aggr = select[i].aggrerate_method;
+        sc.aggr = select[i].aggregate_method;
         gb_out_schema.push_back(sc);
         gb_out_len += sc.len;
 
         AggSpec as;
-        as.method = select[i].aggrerate_method;
+        as.method = select[i].aggregate_method;
         as.in_idx = inIdx;
         as.off = gb_in_schema[inIdx].offset;
         as.len = gb_in_schema[inIdx].len;
@@ -811,7 +811,7 @@ FilterProjectOperator::FilterProjectOperator(Operator *child, Table *table, cons
     for (int i = 0; i < proj_num; i++) {
         memset(&fp_proj_req[i], 0, sizeof(RequestColumn));
         strncpy(fp_proj_req[i].name, proj[i].name, sizeof(fp_proj_req[i].name) - 1);
-        fp_proj_req[i].aggrerate_method = proj[i].aggrerate_method;
+        fp_proj_req[i].aggregate_method = proj[i].aggregate_method;
     }
 }
 
@@ -859,7 +859,7 @@ FilterProjectOperator::FilterProjectOperator(Operator *child, const std::vector<
     for (int i = 0; i < proj_num; i++) {
         memset(&fp_proj_req[i], 0, sizeof(RequestColumn));
         strncpy(fp_proj_req[i].name, proj[i].name, sizeof(fp_proj_req[i].name) - 1);
-        fp_proj_req[i].aggrerate_method = proj[i].aggrerate_method;
+        fp_proj_req[i].aggregate_method = proj[i].aggregate_method;
     }
 }
 
@@ -2019,7 +2019,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result)
             if (sel < 0) sel = 0;
             if (sel > 4) sel = 4;
             for (int i = 0; i < sel; i++) {
-                if (current_query->select_column[i].aggrerate_method != NONE_AM) {
+                if (current_query->select_column[i].aggregate_method != NONE_AM) {
                     has_aggr = true;
                     break;
                 }
@@ -2106,7 +2106,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result)
 
                 //--------------- compile left column -------------------
                 RequestColumn lhsRc = cond.column;
-                lhsRc.aggrerate_method = NONE_AM;
+                lhsRc.aggregate_method = NONE_AM;
                 int leftIdx = findSchemaIndexByReq(e_schema, lhsRc);
                 if (leftIdx < 0) {
                     printf("[Executor][ERROR][exec]: predicate left column not found: %s\n", cond.column.name);
@@ -2123,7 +2123,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result)
                 RequestColumn rhsRc;
                 memset(&rhsRc, 0, sizeof(rhsRc));
                 strncpy(rhsRc.name, cond.value, sizeof(rhsRc.name) - 1);
-                rhsRc.aggrerate_method = NONE_AM;
+                rhsRc.aggregate_method = NONE_AM;
                 int rightIdx = findSchemaIndexByReq(e_schema, rhsRc);
                 bool rhsIsCol = (cond.compare == LINK) || (rightIdx >= 0);
                 ep.right_is_col = rhsIsCol;
@@ -2311,7 +2311,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result)
     //=============================================================================
 
     int produced = 0;
-    while (produced < result->row_capicity && e_root->getNext()) {
+    while (produced < result->row_capacity && e_root->getNext()) {
         char *tuple = e_root->getOutput();
         if (tuple == NULL) continue;
 
@@ -2387,7 +2387,7 @@ int Executor::close()
 //============================================================================
 // ResultTable初始化函数，负责根据执行树输出结果的列类型信息和预设的行容量来分配内存，并准备好相关信息以便后续写入结果。
 //============================================================================
-int ResultTable::init(BasicType *col_types[], int col_num, int64_t capicity) {
+int ResultTable::init(BasicType *col_types[], int col_num, int64_t capacity) {
     // allow re-init safely
     if (buffer != NULL && buffer_size > 0) {// free之前的结果表数据内存（如果有的话）
         g_memory.free(buffer, buffer_size);
@@ -2403,8 +2403,8 @@ int ResultTable::init(BasicType *col_types[], int col_num, int64_t capicity) {
     column_type = col_types;
     column_number = col_num;
     row_length = 0;
-    buffer_size = g_memory.alloc (buffer, capicity);// 分配结果表数据内存
-    if(buffer_size != capicity) {
+    buffer_size = g_memory.alloc (buffer, capacity);// 分配结果表数据内存
+    if(buffer_size != capacity) {
         printf ("[ResultTable][ERROR][init]: buffer allocate error!\n");
         return -1;
     }
@@ -2421,7 +2421,7 @@ int ResultTable::init(BasicType *col_types[], int col_num, int64_t capicity) {
         offset[ii] = row_length;
         row_length += column_type[ii]->getTypeSize(); 
     }
-    row_capicity = (int)(capicity / row_length);
+    row_capacity = (int)(capacity / row_length);
     row_number   = 0;
     return 0;
 }
@@ -2502,7 +2502,7 @@ int ResultTable::shut (void) {
     column_number = 0;
     row_length = 0;
     row_number = 0;
-    row_capicity = 0;
+    row_capacity = 0;
     return 0;
 }
 
