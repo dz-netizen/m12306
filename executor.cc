@@ -11,6 +11,7 @@
 #include "executor.h"
 
 #include "datatype.h"
+#include <algorithm>
 
 static int64_t roundUpPow2(int64_t x) {
     if (x <= 8)
@@ -45,7 +46,7 @@ static bool schemaColMatch(const RequestColumn &rc, const SchemaCol &sc) {
     if (!isQualifiedSuffixMatch(rc.name, sc.name))
         return false;
     // Require aggregate method match to disambiguate duplicates (e.g., SUM(col) vs MAX(col)).
-    return sc.aggr == rc.aggrerate_method;
+    return sc.aggr == rc.aggregate_method;
 }
 
 static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const RequestColumn &rc) {
@@ -54,7 +55,7 @@ static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const Requ
             return (int)i;
     }
     // fallback: allow matching by name only when request has NONE_AM and schema has NONE_AM
-    if (rc.aggrerate_method == NONE_AM) {
+    if (rc.aggregate_method == NONE_AM) {
         for (size_t i = 0; i < schema.size(); i++) {
             if (schema[i].aggr != NONE_AM)
                 continue;
@@ -65,7 +66,7 @@ static int findSchemaIndexByReq(const std::vector<SchemaCol> &schema, const Requ
     return -1;
 }
 
-static BasicType *aggOutType(AggrerateMethod m, BasicType *in) {
+static BasicType *aggOutType(AggregateMethod m, BasicType *in) {
     static TypeInt64 s_int64;
     static TypeFloat64 s_f64;
     if (m == COUNT)
@@ -307,6 +308,8 @@ OrderByOperator::OrderByOperator(Operator *child,
     ob_schema = schema;
     ob_keys.clear();
     ob_rows.clear();
+    ob_chunks.clear();
+    ob_chunk_used = 0;
     ob_pos = 0;
     ob_end = true;
     compileKeys(orderby, orderby_num);
@@ -334,7 +337,7 @@ bool OrderByOperator::compileKeys(const RequestColumn *orderby, int orderby_num)
         if (idx < 0) {
             // best effort: for NONE_AM, match name-only among NONE_AM columns
             RequestColumn tmp = orderby[i];
-            tmp.aggrerate_method = NONE_AM;
+            tmp.aggregate_method = NONE_AM;
             idx = findSchemaIndex(tmp);
         }
         if (idx < 0) {
@@ -368,32 +371,6 @@ bool OrderByOperator::lessTuple(const TupleBuf &a, const TupleBuf &b) const {
     return false;
 }
 
-void OrderByOperator::quickSort(int l, int r) {
-    if (l >= r)
-        return;
-    int i = l;
-    int j = r;
-    TupleBuf pivot = ob_rows[(l + r) / 2];
-
-    while (i <= j) {
-        while (lessTuple(ob_rows[i], pivot))
-            i++;
-        while (lessTuple(pivot, ob_rows[j]))
-            j--;
-        if (i <= j) {
-            TupleBuf tmp = ob_rows[i];
-            ob_rows[i] = ob_rows[j];
-            ob_rows[j] = tmp;
-            i++;
-            j--;
-        }
-    }
-    if (l < j)
-        quickSort(l, j);
-    if (i < r)
-        quickSort(i, r);
-}
-
 bool OrderByOperator::init() {
     if (ob_child == NULL) {
         printf("[OrderByOperator][ERROR][init]: child is NULL\n");
@@ -405,31 +382,85 @@ bool OrderByOperator::init() {
     }
 
     ob_rows.clear();
+    // Free any chunks from a previous (re-)init.
+    for (size_t i = 0; i < ob_chunks.size(); i++) {
+        if (ob_chunks[i].buf != NULL && ob_chunks[i].cap > 0)
+            g_memory.free(ob_chunks[i].buf, ob_chunks[i].cap);
+    }
+    ob_chunks.clear();
+    ob_chunk_used = 0;
     ob_pos = 0;
     ob_end = false;
 
+    // IMPORTANT: do NOT call ob_child->getOutputLen() before the first
+    // successful getNext(). Pass-through operators (e.g. FilterProjectOperator
+    // in residual-filter mode, used right below an ORDER BY) only report a
+    // valid current-tuple length AFTER getNext() returns true; querying it
+    // earlier yields 0. Trusting that 0 here made OrderBy materialize an empty
+    // result and drop every row (the TQ21 bug). We therefore learn the tuple
+    // size lazily from the first row that actually arrives.
+    int64_t tlen = 0;
+    int64_t tlen_aligned = 0;
+    int64_t chunk_sz = 0;
+    // Allocate tuples in large chunks rather than one g_memory.alloc per row.
+    // chunk_sz = max(4 MB, 256 * tlen_aligned) balances small and large tuples.
+    static const int64_t OB_MIN_CHUNK = (int64_t)(4 << 20); // 4 MB
+
     while (ob_child->getNext()) {
         const char *t = ob_child->getOutput();
-        int64_t tlen = ob_child->getOutputLen();
-        if (t == NULL || tlen <= 0)
+        if (t == NULL)
             continue;
-        int64_t cap = roundUpPow2(tlen);
-        char *buf = NULL;
-        int64_t got = g_memory.alloc(buf, cap);
-        if (got != cap) {
-            printf("[OrderByOperator][ERROR][init]: alloc tuple buffer failed\n");
-            return false;
+
+        if (tlen == 0) {
+            // First real tuple: now the child's length is meaningful.
+            tlen = ob_child->getOutputLen();
+            if (tlen <= 0) {
+                // Cannot determine tuple size; skip this tuple rather than
+                // mis-allocating a chunk.
+                tlen = 0;
+                continue;
+            }
+            // Round tuple size up to power-of-2 alignment so each slot in a
+            // chunk is naturally aligned and sizeof easily computable.
+            tlen_aligned = roundUpPow2(tlen);
+            chunk_sz = OB_MIN_CHUNK;
+            if (chunk_sz < tlen_aligned * 256)
+                chunk_sz = tlen_aligned * 256;
         }
-        memcpy(buf, t, (size_t)tlen);
+
+        if (ob_chunks.empty() || ob_chunk_used + tlen_aligned > ob_chunks.back().cap) {
+            char *newbuf = NULL;
+            int64_t got = g_memory.alloc(newbuf, chunk_sz);
+            if (got != chunk_sz) {
+                printf("[OrderByOperator][ERROR][init]: alloc chunk failed\n");
+                return false;
+            }
+            TupleChunk tc;
+            tc.buf = newbuf;
+            tc.cap = chunk_sz;
+            ob_chunks.push_back(tc);
+            ob_chunk_used = 0;
+        }
+
+        char *slot = ob_chunks.back().buf + ob_chunk_used;
+        memcpy(slot, t, (size_t)tlen);
+        ob_chunk_used += tlen_aligned;
+
         TupleBuf tb;
-        tb.buf = buf;
-        tb.cap = cap;
+        tb.buf = slot;
         tb.len = tlen;
         ob_rows.push_back(tb);
     }
 
+    // Use std::sort instead of a hand-rolled recursive quicksort.
+    // std::sort uses introsort (hybrid quicksort + heapsort) which guarantees
+    // O(N log N) worst-case depth, eliminating the stack-overflow risk that the
+    // recursive implementation had on sorted or nearly-sorted input.
     if (!ob_rows.empty() && !ob_keys.empty()) {
-        quickSort(0, (int)ob_rows.size() - 1);
+        std::sort(ob_rows.begin(), ob_rows.end(),
+                  [this](const TupleBuf &a, const TupleBuf &b) {
+                      return lessTuple(a, b);
+                  });
     }
     return true;
 }
@@ -462,14 +493,12 @@ int64_t OrderByOperator::getOutputLen() {
 }
 
 bool OrderByOperator::close() {
-    for (size_t i = 0; i < ob_rows.size(); i++) {
-        if (ob_rows[i].buf != NULL && ob_rows[i].cap > 0) {
-            g_memory.free(ob_rows[i].buf, ob_rows[i].cap);
-        }
-        ob_rows[i].buf = NULL;
-        ob_rows[i].cap = 0;
-        ob_rows[i].len = 0;
+    for (size_t i = 0; i < ob_chunks.size(); i++) {
+        if (ob_chunks[i].buf != NULL && ob_chunks[i].cap > 0)
+            g_memory.free(ob_chunks[i].buf, ob_chunks[i].cap);
     }
+    ob_chunks.clear();
+    ob_chunk_used = 0;
     ob_rows.clear();
     ob_pos = 0;
     ob_end = true;
@@ -527,13 +556,13 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
 
     // aggregations (in select order, keep duplicates distinguished by method)
     for (int i = 0; i < select_num; i++) {
-        if (select[i].aggrerate_method == NONE_AM)
+        if (select[i].aggregate_method == NONE_AM)
             continue;
         int inIdx = findInSchemaIndex(select[i]);
         if (inIdx < 0) {
             // for aggregates, match just by name when input schema has NONE_AM
             RequestColumn tmp = select[i];
-            tmp.aggrerate_method = NONE_AM;
+            tmp.aggregate_method = NONE_AM;
             inIdx = findInSchemaIndex(tmp);
         }
         if (inIdx < 0) {
@@ -542,7 +571,7 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
         }
 
         BasicType *inType = gb_in_schema[inIdx].type;
-        BasicType *outType = aggOutType(select[i].aggrerate_method, inType);
+        BasicType *outType = aggOutType(select[i].aggregate_method, inType);
         if (outType == NULL)
             return false;
 
@@ -552,12 +581,12 @@ bool GroupByAggrOperator::buildOutputSchema(const RequestColumn *groupby, int gr
         sc.type = outType;
         sc.offset = gb_out_len;
         sc.len = outType->getTypeSize();
-        sc.aggr = select[i].aggrerate_method;
+        sc.aggr = select[i].aggregate_method;
         gb_out_schema.push_back(sc);
         gb_out_len += sc.len;
 
         AggSpec as;
-        as.method = select[i].aggrerate_method;
+        as.method = select[i].aggregate_method;
         as.in_idx = inIdx;
         as.off = gb_in_schema[inIdx].offset;
         as.len = gb_in_schema[inIdx].len;
@@ -847,7 +876,7 @@ FilterProjectOperator::FilterProjectOperator(Operator *child, Table *table, cons
     for (int i = 0; i < proj_num; i++) {
         memset(&fp_proj_req[i], 0, sizeof(RequestColumn));
         strncpy(fp_proj_req[i].name, proj[i].name, sizeof(fp_proj_req[i].name) - 1);
-        fp_proj_req[i].aggrerate_method = proj[i].aggrerate_method;
+        fp_proj_req[i].aggregate_method = proj[i].aggregate_method;
     }
 }
 
@@ -929,7 +958,7 @@ FilterProjectOperator::FilterProjectOperator(Operator *child, const std::vector<
     for (int i = 0; i < proj_num; i++) {
         memset(&fp_proj_req[i], 0, sizeof(RequestColumn));
         strncpy(fp_proj_req[i].name, proj[i].name, sizeof(fp_proj_req[i].name) - 1);
-        fp_proj_req[i].aggrerate_method = proj[i].aggrerate_method;
+        fp_proj_req[i].aggregate_method = proj[i].aggregate_method;
     }
 }
 
@@ -1476,15 +1505,18 @@ HashJoinOperator::HashJoinOperator(Operator *left, Operator *right,
     hj_key_type = key_type;
     hj_key_len = (hj_key_type != NULL ? hj_key_type->getTypeSize() : 0);
 
-    hj_end = true; // 关闭状态
+    hj_end = true;
     hj_out = NULL;
     hj_out_len = 0;
     hj_out_cap = 0;
 
-    hj_cur_left = NULL; // 当前正在匹配的左 tupl
+    hj_chunks.clear();
+    hj_chunk_used = 0;
+
+    hj_cur_left = NULL;
     hj_cur_left_len = 0;
-    hj_cur_match_idx.clear(); // 当前左 tuple 匹配到的右 tuple 下标列表
-    hj_cur_match_pos = 0;     // 已经输出到第几个匹配
+    hj_cur_match_idx.clear();
+    hj_cur_match_pos = 0;
 }
 
 /**
@@ -1536,48 +1568,69 @@ bool HashJoinOperator::buildHash() {
     // 扫描右子算子，把右侧所有 tuple 存进内存，并建立哈希表
     // 为什么要复制右 tuple？ 因为子算子的输出缓冲区通常会被下一次 getNext() 覆盖，为了后续 join 时访问对应右 tuple 内容必须进行拷贝
 
-    hj_build.clear(); // 内存管理
-    hj_map.clear();   // 匹配管理
-    // 检查右子算子是否为空
+    hj_build.clear();
+    hj_map.clear();
+    // Free any chunks from a previous init.
+    for (size_t i = 0; i < hj_chunks.size(); i++) {
+        if (hj_chunks[i].buf != NULL && hj_chunks[i].cap > 0)
+            g_memory.free(hj_chunks[i].buf, hj_chunks[i].cap);
+    }
+    hj_chunks.clear();
+    hj_chunk_used = 0;
+
     if (hj_right == NULL) {
         printf("[HashJoinOperator][ERROR][buildHash]: right is NULL\n");
         return false;
     }
-    // 获取右 tuple 的长度
     const int64_t rightLen = hj_right->getOutputLen();
     if (rightLen <= 0) {
         printf("[HashJoinOperator][ERROR][buildHash]: right tuple len invalid\n");
         return false;
     }
+    int64_t rightLen_aligned = roundUpPow2(rightLen);
+
+    // Allocate build-side tuples in large chunks to reduce g_memory call
+    // count and fragmentation when the right (inner) table is large.
+    static const int64_t HJ_MIN_CHUNK = (int64_t)(4 << 20); // 4 MB
+    int64_t chunk_sz = HJ_MIN_CHUNK;
+    if (chunk_sz < rightLen_aligned * 256)
+        chunk_sz = rightLen_aligned * 256;
 
     while (hj_right->getNext()) {
         char *tup = hj_right->getOutput();
         if (tup == NULL)
             continue;
-        // 申请一块新内存, 把 tuple 内容复制进去
-        int64_t cap = roundUpPow2(rightLen);
-        char *buf = NULL;
-        int64_t got = g_memory.alloc(buf, cap);
-        if (got != cap) {
-            printf("[HashJoinOperator][ERROR][buildHash]: alloc build tuple failed\n");
-            return false;
+
+        if (hj_chunks.empty() || hj_chunk_used + rightLen_aligned > hj_chunks.back().cap) {
+            char *newbuf = NULL;
+            int64_t got = g_memory.alloc(newbuf, chunk_sz);
+            if (got != chunk_sz) {
+                printf("[HashJoinOperator][ERROR][buildHash]: alloc chunk failed\n");
+                return false;
+            }
+            BuildChunk bc;
+            bc.buf = newbuf;
+            bc.cap = chunk_sz;
+            hj_chunks.push_back(bc);
+            hj_chunk_used = 0;
         }
-        memcpy(buf, tup, (size_t)rightLen);
+
+        char *slot = hj_chunks.back().buf + hj_chunk_used;
+        memcpy(slot, tup, (size_t)rightLen);
+        hj_chunk_used += rightLen_aligned;
 
         BuildTuple bt;
-        bt.buf = buf;
-        bt.cap = cap;
+        bt.buf = slot;
         bt.len = rightLen;
         int idx = (int)hj_build.size();
-        hj_build.push_back(bt); // 存入 hj_build
+        hj_build.push_back(bt);
 
         std::string k;
-        // 调用 extractKey() 提取右侧 join key
         if (!extractKey(k, bt.buf, hj_right_key_off)) {
             printf("[HashJoinOperator][ERROR][buildHash]: extract key failed\n");
             return false;
         }
-        hj_map[k].push_back(idx); // 把 key -> tuple 下标 插入 hj_map
+        hj_map[k].push_back(idx);
     }
     return true;
 }
@@ -1773,14 +1826,15 @@ bool HashJoinOperator::close() {
     hj_out_cap = 0;
     hj_out_len = 0;
 
-    // 遍历 hj_build，释放所有右侧 tuple 拷贝
-    for (size_t i = 0; i < hj_build.size(); i++) {
-        if (hj_build[i].buf != NULL && hj_build[i].cap > 0) {
-            g_memory.free(hj_build[i].buf, hj_build[i].cap);
-        }
+    // Free chunk-based build-side storage.
+    for (size_t i = 0; i < hj_chunks.size(); i++) {
+        if (hj_chunks[i].buf != NULL && hj_chunks[i].cap > 0)
+            g_memory.free(hj_chunks[i].buf, hj_chunks[i].cap);
     }
-    hj_build.clear(); // 清空 hj_build
-    hj_map.clear();   // 清空哈希表 hj_map
+    hj_chunks.clear();
+    hj_chunk_used = 0;
+    hj_build.clear();
+    hj_map.clear();
 
     // 清空当前左 tuple 和匹配状态
     hj_cur_left = NULL;
@@ -2494,7 +2548,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result) {
             if (sel > 4)
                 sel = 4;
             for (int i = 0; i < sel; i++) {
-                if (current_query->select_column[i].aggrerate_method != NONE_AM) {
+                if (current_query->select_column[i].aggregate_method != NONE_AM) {
                     has_aggr = true;
                     break;
                 }
@@ -2594,7 +2648,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result) {
 
                 //--------------- compile left column -------------------
                 RequestColumn lhsRc = cond.column;
-                lhsRc.aggrerate_method = NONE_AM;
+                lhsRc.aggregate_method = NONE_AM;
                 int leftIdx = findSchemaIndexByReq(e_schema, lhsRc);
                 if (leftIdx < 0) {
                     printf("[Executor][ERROR][exec]: predicate left column not found: %s\n", cond.column.name);
@@ -2612,7 +2666,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result) {
                 RequestColumn rhsRc;
                 memset(&rhsRc, 0, sizeof(rhsRc));
                 strncpy(rhsRc.name, cond.value, sizeof(rhsRc.name) - 1);
-                rhsRc.aggrerate_method = NONE_AM;
+                rhsRc.aggregate_method = NONE_AM;
                 int rightIdx = findSchemaIndexByReq(e_schema, rhsRc);
                 bool rhsIsCol = (cond.compare == LINK) || (rightIdx >= 0);
                 ep.right_is_col = rhsIsCol;
@@ -2811,7 +2865,7 @@ int Executor::exec(SelectQuery *query, ResultTable *result) {
     //=============================================================================
 
     int produced = 0;
-    while (produced < result->row_capicity && e_root->getNext()) {
+    while (produced < result->row_capacity && e_root->getNext()) {
         char *tuple = e_root->getOutput();
         if (tuple == NULL)
             continue;
@@ -2921,7 +2975,7 @@ int ResultTable::init(BasicType *col_types[], int col_num, int64_t capicity) {
         offset[ii] = row_length;
         row_length += column_type[ii]->getTypeSize();
     }
-    row_capicity = (int)(capicity / row_length);
+    row_capacity = (int)(capicity / row_length);
     row_number = 0;
     return 0;
 }
@@ -3005,7 +3059,7 @@ int ResultTable::shut(void) {
     column_number = 0;
     row_length = 0;
     row_number = 0;
-    row_capicity = 0;
+    row_capacity = 0;
     return 0;
 }
 

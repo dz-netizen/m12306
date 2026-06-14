@@ -679,10 +679,18 @@ class OrderByOperator : public Operator {
 
     struct TupleBuf {
         char *buf;
-        int64_t cap;
         int64_t len;
     };
     std::vector<TupleBuf> ob_rows;
+
+    // Chunk-based allocation: all tuple data lives in large blocks to reduce
+    // g_memory call count and fragmentation on large result sets.
+    struct TupleChunk {
+        char *buf;
+        int64_t cap;
+    };
+    std::vector<TupleChunk> ob_chunks;
+    int64_t ob_chunk_used;
 
     size_t ob_pos;
     bool ob_end;
@@ -691,7 +699,6 @@ class OrderByOperator : public Operator {
     int findSchemaIndex(const RequestColumn &rc) const;
     bool compileKeys(const RequestColumn *orderby, int orderby_num);
     bool lessTuple(const TupleBuf &a, const TupleBuf &b) const;
-    void quickSort(int l, int r);
 
   public:
     /**
@@ -954,11 +961,17 @@ class HashJoinOperator : public Operator {
 
     struct BuildTuple {
         char *buf;
-        int64_t cap;
         int64_t len;
     };
-
     std::vector<BuildTuple> hj_build;
+
+    // Chunk-based allocation for build-side tuples.
+    struct BuildChunk {
+        char *buf;
+        int64_t cap;
+    };
+    std::vector<BuildChunk> hj_chunks;
+    int64_t hj_chunk_used;
 
     bool hj_end;
     char *hj_out;
